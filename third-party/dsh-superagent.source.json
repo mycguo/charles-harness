@@ -15,7 +15,7 @@
     },
     {
       "path": "docs/006-deployment.md",
-      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage. Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
     },
     {
       "path": "skills/dsh-superagent-github/SKILL.md",
@@ -52,6 +52,46 @@
     {
       "path": "tests/sources.spec.ts",
       "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+    },
+    {
+      "path": "README.md",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "docs/007-architecture.md",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "package.json",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "src/app/runtime.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "src/app/store-read.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "src/app/store.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "src/deployment.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "tests/deployment.spec.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "tsdown.config.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
     }
   ],
   "portedChanges": [
@@ -63,6 +103,12 @@
     }
   ],
   "localAdditions": [
-    "tests/expected/github-skill.md"
+    "tests/expected/github-skill.md",
+    "pnpm-workspace.yaml",
+    "src/app/database.ts",
+    "src/app/open-store.ts",
+    "src/app/postgres-worker.ts",
+    "src/app/postgres.ts",
+    "tests/postgres.spec.ts"
   ]
 }
