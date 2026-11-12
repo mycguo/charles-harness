@@ -1,12 +1,16 @@
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { z } from 'zod'
+import { Sessions } from '../src/app/sessions.ts'
 import { Context } from '@deepseek-ai/cordis'
-import { bindScopeParent } from '@deepseek-ai/dsh-scope'
+import { bindScopeParent, createScope } from '@deepseek-ai/dsh-scope'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { ToolCallId, type UserMessage } from '@deepseek-ai/dsh-llm'
+import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { Runtime } from '../src/app/runtime.ts'
 import { jobRegistry } from './fixtures/host.ts'
 import { evalsHealth } from '../src/app/views/overview.ts'
@@ -1793,4 +1797,99 @@ it('keeps the Policy the main Session judges by in its prompt, after admission a
   await runtime.settings.save('policy', { ...saved.policy, rules: rules.map(rule => ({ ...rule, enabled: false })) }, runtime.store.blockRevision('policy'), 'panel')
   expect(policy()).toContain('No rule is enabled: a proactive candidate can only be ignored.')
   expect(policy()).toContain('The accept mode and the rules decide proactive candidates only')
+})
+
+it.each(['enabled', 'disabled', 'late'] as const)('enforces real scoped Jira read-tool permissions for router, worker and descendants (%s)', async mode => {
+  const enabled = mode !== 'disabled'
+  const { ticket, sessionId } = await acceptedTicket()
+  const root = new Context()
+  await root.plugin(SystemPrompt)
+  await root.plugin(ToolRuntime)
+  const scopedAgents = new Map<string, Agent>()
+  root.reflect.provide('agents', scopedAgents)
+  root.reflect.provide('skills', { register: () => () => {} })
+  let ctx!: Context
+  await root.plugin({ inject: ['tools', 'agents', 'systemPrompt', 'skills'], apply: child => { ctx = child } })
+  const sessions = new Sessions({ context: ctx, store: runtime.store, prompts: runtime.prompts,
+    effects: { handle: () => () => {}, enqueue: () => {}, idle: async () => {}, pending: () => false },
+    health: { get: () => undefined, set: () => {}, release: () => {} }, masterId: runtime.masterId,
+    lifetime: new AbortController().signal, closing: () => false, environment: () => [],
+    tools: () => [{ name: 'orchestrator_probe', description: 'Local schema projection regression probe',
+      schema: z.object({ value: z.string().min(1) }), execute: async () => ({ ok: true }) }] })
+  sessions.install()
+  const reads = ['jira_kareo_search', 'jira_kareo_get_issue', 'jira_kareo_comments', 'jira_kareo_history']
+  const bodies = new Map<string, ReturnType<typeof vi.fn>>()
+  const registrations = new Map<string, () => void>()
+  const register = (name: string) => {
+    const execute = vi.fn(async () => ({ ok: true }))
+    bodies.set(name, execute)
+    registrations.set(name, root.tools.register({ name, description: name, parameters: { type: 'object', properties: {} }, execute,
+      output: { schema: { type: 'object', additionalProperties: true }, render: () => [] } }))
+  }
+  try {
+    // A write-shaped sibling must not gain access merely by sharing the Jira tool prefix.
+    for (const name of ['read', 'jira_kareo_update_issue', ...mode === 'enabled' ? reads : []]) register(name)
+    const create = async (id: string, parentSession?: string) => {
+      const agent = {} as Agent
+      Object.assign(agent, { id, status: 'idle', session: { header: { parentSession }, snapshotEvents: () => [] } })
+      const preset = {}
+      createScope(ctx, preset)
+      const scope = createScope(ctx, agent, { parent: preset })
+      Object.assign(agent, { ctx: scope.ctx })
+      scopedAgents.set(id, agent)
+      await root.parallel('agent/created', { agent } as never)
+      return agent
+    }
+    const router = await create(runtime.masterId)
+    const worker = await create(sessionId)
+    const child = await create('jira-child', sessionId)
+    const grandchild = await create('jira-grandchild', child.id)
+    const call = (agent: Agent, name: string) => root.tools.execute({ agent, name, callId: ToolCallId('jira-permissions'),
+      arguments: {}, signal: new AbortController().signal })
+    const managed = [router, worker, child, grandchild]
+    if (mode === 'late') {
+      for (const agent of managed) {
+        expect(root.tools.schemas(agent).some(tool => reads.includes(tool.name))).toBe(false)
+        expect((await call(agent, reads[0]!)).isError).toBe(true)
+      }
+      // Optional bundle plugins can finish loading after every managed Session was already decorated.
+      for (const name of reads) register(name)
+      for (const agent of managed) for (const name of reads) expect(root.tools.get(name, agent)).toBeDefined()
+      // Unloading and reloading a plugin refreshes restrictions without a Session restart.
+      registrations.get(reads[0]!)!()
+      for (const agent of managed) expect(root.tools.get(reads[0]!, agent)).toBeUndefined()
+      register(reads[0]!)
+    }
+    for (const agent of managed) {
+      const local = agent === router || agent === worker ? ['orchestrator_probe'] : []
+      expect(root.tools.schemas(agent).map(tool => tool.name).sort()).toEqual(['read', ...enabled ? reads : [], ...local].sort())
+      for (const name of reads) expect((await call(agent, name)).isError).toBe(!enabled)
+      expect((await call(agent, 'jira_kareo_update_issue')).isError).toBe(true)
+    }
+    expect(bodies.get('jira_kareo_update_issue')).not.toHaveBeenCalled()
+    if (enabled) {
+      runtime.engine.stopTicket(ticket.id)
+      for (const agent of [worker, child, grandchild]) {
+        for (const name of reads) expect(await call(agent, name)).toMatchObject({ isError: true,
+          content: expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('Ticket ended') })]) })
+      }
+      for (const name of reads) {
+        expect(bodies.get(name)).toHaveBeenCalledTimes(4)
+        expect((await call(router, name)).isError).toBe(false)
+      }
+    }
+    if (mode === 'late') {
+      const changes = vi.fn()
+      root.on('tools/change', changes)
+      sessions.dispose()
+      changes.mockClear()
+      registrations.get(reads[0]!)!()
+      register(reads[0]!)
+      // No released Session listener may recreate a restriction when the plugin changes again.
+      expect(changes).toHaveBeenCalledTimes(2)
+    }
+  } finally {
+    sessions.dispose()
+    await root.fiber.dispose()
+  }
 })

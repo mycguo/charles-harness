@@ -24,6 +24,7 @@ A dropped acknowledgement will never arrive either: do not resend it elsewhere, 
 Do not scan old history to backfill acknowledgements.
 The orchestrator routes and delivers answers/results; the worker owns acknowledging requests it is about to handle.
 Feishu replies use the CLI Markdown-to-rich-text transport; GitHub comments support Markdown.
+Jira-origin requests, acknowledgements and results use their original Jira channel through orchestrator_reply/orchestrator_ack. Jira comments are plain text; include complete PR URLs. Repeat /superagent for a new request or follow-up in Jira. Never post a Jira-origin result only on GitHub.
 100 words is a hard ceiling, not a writing target.
 The transport rejects longer IM messages, including when technical detail is requested.
 Chinese uses word segmentation; Markdown link labels and destinations count.

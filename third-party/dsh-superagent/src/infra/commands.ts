@@ -61,9 +61,14 @@ export class Commands {
    * @param resolved - returns the resolved deployment setup, or throws while setup is still pending.
    * @param environment - variables overriding `process.env` for every command (such as isolated git settings).
    */
-  constructor(private readonly resolved: () => Deployment, private readonly environment: Record<string, string | undefined>, private readonly signal: AbortSignal) {}
+  constructor(private readonly resolved: () => Deployment, private readonly environment: Record<string, string | undefined>, readonly signal: AbortSignal) {}
   get deployment(): Deployment { return this.resolved() }
   get repository(): string { return this.deployment.repository }
+  /** Rejects Jira mappings outside this deployment's configured GitHub repository. */
+  forRepository(repository: string): Commands {
+    if (repository.toLowerCase() !== this.repository.toLowerCase()) throw new Error('Repository is not configured for this deployment')
+    return this
+  }
   withSignal(signal?: AbortSignal): Commands { return signal ? new Commands(this.resolved, this.environment, AbortSignal.any([this.signal, signal])) : this }
   async run(program: string, args: string[], cwd?: string): Promise<string> {
     try {

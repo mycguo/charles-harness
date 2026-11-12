@@ -77,3 +77,7 @@ Send one message, under 300 words: what will be installed, the accounts and CLIs
 - How to try it: from an account on the allowed list, comment `@<agent login> <request>` on an issue or PR in the repository. If the account is shared with the agent, start the comment with `/superagent <request>` instead. A Ticket appears on the overview within about a minute.
 - Three rules for the operator, from the Responsibility section of `docs/000-philosophy.md`: start narrow, tune for less noise, own what the agent says.
 - Where to read more: the numbered documents in `docs/`, in order.
+
+## Jira integrations
+
+After rebuilding and reinstalling this bundle, follow [Jira read tools](docs/013-jira-rest.md), [Jira comment requests](docs/014-jira-source.md), or [Jira MCP setup](docs/012-jira-mcp.md). Use the existing `superagent` profile and `DSH_HOME`; preserve existing settings and enable only the integrations you need.

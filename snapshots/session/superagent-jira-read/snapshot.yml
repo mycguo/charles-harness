@@ -1,0 +1,12 @@
+version: 1
+scenario: superagent-jira-read
+profile: headless
+composition: superagent-jira-read
+recording: authored
+header:
+  class: superagent-jira-read
+  pin: true
+  systemPromptSource: text-turn
+environment:
+  JIRA_SNAPSHOT_EMAIL: snapshot@example.com
+  JIRA_SNAPSHOT_TOKEN: snapshot-token

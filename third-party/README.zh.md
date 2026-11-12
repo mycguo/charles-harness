@@ -41,3 +41,7 @@ DSH_HOME="$HOME/.dsh_charles" pnpm dsh plugin --profile superagent add file:"$PW
 ## 单账号模式
 
 当操作者与 agent（智能体）共用 GitHub 账号时，启用 **Superagent → Settings → Sources → GitHub → Single-account mode**。将该用户名加入 GitHub Policy 允许名单，然后在每次新请求或后续请求的第一个非空行写 `/superagent` 加具体指令。此模式默认关闭；带标记的 agent 输出仍被排除。
+
+## Jira
+
+启用可选的 [Jira 读取工具](dsh-superagent/docs/013-jira-rest.md)、[评论请求来源](dsh-superagent/docs/014-jira-source.md)或[具名 MCP 连接](dsh-superagent/docs/012-jira-mcp.md)前，先重新构建并安装 bundle。每个 Jira 项目均映射到此部署已配置的 GitHub 仓库。

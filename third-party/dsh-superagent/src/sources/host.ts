@@ -38,6 +38,8 @@ export interface SourceContext {
   readonly problem?: SetupProblem | undefined
   /** Returns a Source's configuration while enabled, or undefined while disabled or uninstalled. */
   config<C extends Record<string, unknown>>(kind: string): C | undefined
+  /** Tests the exact sender ID against this Source’s current allowed list, including subscribed-thread intake. */
+  allowsSender(id: string): boolean
   /** Ingests a trigger into the Engine and schedules the next evaluation pass; callers should await completion before advancing read cursors. */
   receive(trigger: Trigger): ReceiveResult | Promise<ReceiveResult>
   atomic<T>(work: () => T): T

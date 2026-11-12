@@ -356,6 +356,13 @@ it('keeps shared-account command and output-marker guidance in the registered Gi
   await expect(skill).toMatchFileSnapshot('./expected/github-skill.md')
 })
 
+it('snapshots the Jira reply-channel and worker investigation guidance in assembled prompts', async () => {
+  const text = [...new Map(surfaces.filter(surface => surface.where === 'orchestrator prompt runtime/replies'
+    || surface.where === 'worker prompt runtime/work').map(surface => [surface.where, { where: surface.where, text: surface.text }])).values()]
+  expect(text).toHaveLength(2)
+  await expect(JSON.stringify(text, null, 2) + '\n').toMatchFileSnapshot('./expected/jira-prompts.json')
+})
+
 it('collects both roles\' tools, prompts, skills and inputs', () => {
   expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_read', 'orchestrator_report',
     'orchestrator_thread_follow',
