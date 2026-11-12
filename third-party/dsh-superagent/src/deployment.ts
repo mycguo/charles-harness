@@ -14,6 +14,11 @@ const absolute = (description: string) => s.string().pattern(/^\//).description(
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 export const Config = s.object({
   stateDir: absolute('Directory for the database, locks, worker shims, the agent\'s git configuration and, by default, the ticket directories.').required(),
+  databaseUrl: s.string().description('PostgreSQL URL without credentials in the password field; absent uses local SQLite.'),
+  databasePasswordEnv: s.string().pattern(/^[A-Za-z_][A-Za-z0-9_]*$/).default('DB_PASSWORD').description('Host environment variable containing the database password; its name must contain KEY, PASSWORD, SECRET, or TOKEN.'),
+  databaseSchema: s.string().pattern(/^[a-z_][a-z0-9_]{0,62}$/).default('dsh_superagent').description('Dedicated PostgreSQL schema; one writer may own it at a time.'),
+  databaseImportSqlite: s.boolean().default(false).description('Import the state directory SQLite database once into an empty PostgreSQL store; stop the old runtime first.'),
+  databaseTimeoutMs: s.number().min(1000).max(300000).step(1).default(30000).description('PostgreSQL connection and statement timeout, in milliseconds.'),
   promptMaxChars: s.number().min(LIMITS.promptMaxChars.min).max(LIMITS.promptMaxChars.max).step(1).default(100000)
     .description('Largest saved prompt configuration, in characters.').volatile(),
   admissionContextMaxPages: s.number().min(LIMITS.admissionContextMaxPages.min).max(LIMITS.admissionContextMaxPages.max).step(1).default(10)
@@ -24,6 +29,11 @@ export const Config = s.object({
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
   stateDir: string
+  databaseUrl?: string
+  databasePasswordEnv?: string
+  databaseSchema?: string
+  databaseImportSqlite?: boolean
+  databaseTimeoutMs?: number
   promptMaxChars: Volatile<number>
   admissionContextMaxPages: Volatile<number>
   admissionContextTimeoutMs: Volatile<number>
@@ -39,7 +49,9 @@ export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; docs/006-deployment.md lists the keys`)
   const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs } = config
-  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs }
+  if (config.databaseImportSqlite && !config.databaseUrl) throw new Error('databaseImportSqlite requires databaseUrl')
+  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs,
+    databaseUrl: config.databaseUrl, databasePasswordEnv: config.databasePasswordEnv, databaseSchema: config.databaseSchema, databaseImportSqlite: config.databaseImportSqlite, databaseTimeoutMs: config.databaseTimeoutMs }
 }
 
 export const GithubAccountsSchema = z.object({

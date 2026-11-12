@@ -1,9 +1,10 @@
 /** Read-only Store queries for views, tools, and Source polling. */
-import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
+import type { SQLInputValue } from 'node:sqlite'
+import type { StoreDatabase } from './database.ts'
 import type { Decision, Thread, Trigger } from '../core/index.ts'
 import type { Dropped, Receipt, TimelinePlace } from './store.ts'
 
-export function storeReads(db: DatabaseSync) {
+export function storeReads(db: StoreDatabase) {
   const values = <T>(sql: string, ...parameters: SQLInputValue[]): T[] => db.prepare(sql).all(...parameters).map(row => JSON.parse(String(row.value)) as T)
   return {
   /** Newest first by arrival (`rowid`) order rather than trigger timestamp. */
@@ -11,7 +12,7 @@ export function storeReads(db: DatabaseSync) {
   /** Per-source trigger counts since `since`, plus the latest arrival timestamp across all time. */
   triggerStats: (since: string): Record<string, { received: number; filtered: number; lastAt: string }> => {
     const result: Record<string, { received: number; filtered: number; lastAt: string }> = {}
-    for (const row of db.prepare("SELECT json_extract(t.value, '$.source') AS source, MAX(t.at) AS last, SUM(t.at >= ?) AS received, SUM(t.at >= ? AND json_extract(d.value, '$.filtered') IS NOT NULL) AS filtered FROM trigger t LEFT JOIN disposition d ON d.id = t.id GROUP BY source").all(since, since))
+    for (const row of db.prepare("SELECT json_extract(t.value, '$.source') AS source, MAX(t.at) AS last, SUM(CAST(t.at >= ? AS INTEGER)) AS received, SUM(CAST(t.at >= ? AND json_extract(d.value, '$.filtered') IS NOT NULL AS INTEGER)) AS filtered FROM trigger t LEFT JOIN disposition d ON d.id = t.id GROUP BY source").all(since, since))
       result[String(row.source)] = { received: Number(row.received ?? 0), filtered: Number(row.filtered ?? 0), lastAt: String(row.last ?? '') }
     return result
   },

@@ -148,7 +148,7 @@ Trigger and Thread `meta` belong to the Source. The core does not interpret them
 
 ### Store
 
-`Store` (`src/app/store.ts`) owns one SQLite database. Runtime acquires the directory lock before opening it, preventing a second process from migrating or writing the same state.
+`Store` (`src/app/store.ts`) owns one SQLite database by default, or a configured PostgreSQL session through `src/app/postgres.ts`. Runtime acquires the directory lock before opening either backend; PostgreSQL also holds a schema-specific advisory lock. `third-party/postgresql.md` owns configuration, import and recovery.
 
 Its interfaces are grouped by purpose:
 
@@ -319,6 +319,10 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/outbox.ts` | The Outbox: the Engine's `Outbox` port, the receipts and the `reply` effects that send them |
 | `src/app/notices.ts` | The main Session's notices and relays: `eventNotice`, `reportRelay`, `resultRelay` and `followupRelay` |
 | `src/app/store.ts` | The Store, and `Receipt`, a message of the outbox |
+| `src/app/database.ts` | Store statement interface and PostgreSQL query rendering |
+| `src/app/open-store.ts` | Backend selection and environment-owned password resolution |
+| `src/app/postgres.ts` | PostgreSQL schema, exclusive ownership and atomic SQLite import |
+| `src/app/postgres-worker.ts` | Dedicated PostgreSQL connection worker and failure containment |
 | `src/app/store-read.ts` | `storeReads`: the Store's read queries for the views, the tools and the Sources' polls, which never write |
 | `src/app/migration.ts` | The schema 11 migration: one step from schema 10 that writes every stored record in its current shape |
 | `src/app/effects.ts` | Effects |
@@ -432,6 +436,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/timeline.spec.ts` | A Thread's pages and a Trigger's neighbours by time and then id, with every received Trigger's time in one form |
 | `tests/migration.spec.ts` | The schema 11 migration: every stored record in its current shape, and the refusal of older schemas |
 | `tests/store.spec.ts` | Repositories and their working sets, in SQLite as in memory, the kv area, with every key of `KV` spelled only in `src/kv.ts` and the migration, settings history and queries |
+| `tests/postgres.spec.ts` | Native PostgreSQL transaction, import, ownership and SQLite behavior comparison; optional live Supabase run |
 | `tests/prompts.spec.ts` | Prompt validation, assembly and versions |
 | `tests/cards.spec.ts` | The rules the built-in text must state, file by file |
 | `tests/model-surface.spec.ts` | Everything models read: tools, prompts, skills and inputs, checked against the tool schemas, the execution environment and the glossary, within a size budget per role |

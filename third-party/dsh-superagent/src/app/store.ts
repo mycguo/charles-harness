@@ -1,5 +1,6 @@
-/** SQLite persistence for domain aggregates, key-value state, settings history, and the channel outbox. */
+/** Transactional persistence for domain aggregates, key-value state, settings history, and the channel outbox. */
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
+import type { StoreDatabase } from './database.ts'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { key, threadKey, type ChannelRef, type Decision, type OutboundMessage, type ReplyStatus, type Repositories, type Thread, type ThreadFact,
@@ -44,18 +45,23 @@ const SETS: Record<string, Record<string, string>> = {
 }
 export { SCHEMA_VERSION }
 /**
- * SQLite backing store implementing domain `Repositories`, view read queries, versioned settings, outbox receipts, and key-value state.
+ * Aggregate store implementing domain `Repositories`, view read queries, versioned settings, outbox receipts, and key-value state.
  * The Runtime opens it after locking the state directory and automatically migrates supported older schemas on startup.
  * The Engine mutates domain aggregates inside `atomic` transactions while Sources, views, and the Outbox read state or update their own records.
  */
 export class Store implements Repositories {
-  readonly db: DatabaseSync
+  readonly db: StoreDatabase
   /**
-   * Opens or creates the SQLite database at `path`, migrating schema 10 to schema 11 in a single transaction.
+   * Opens a SQLite path (migrating schema 10 to 11), or adopts an initialized database whose ownership transfers to this store.
    * @param report - Receives errors thrown by `afterCommit` callbacks without failing the committed transaction.
    * @throws When the database schema is older than `OLDEST_SCHEMA` (10), newer than `SCHEMA_VERSION` (11), or when migration fails; in every case the database file is left unchanged and the SQLite handle is closed so a later attempt in the same process can open it.
    */
-  constructor(path: string, private readonly report: (error: unknown) => void = () => {}) {
+  constructor(path: string | StoreDatabase, private readonly report: (error: unknown) => void = () => {}) {
+    if (typeof path !== 'string') {
+      this.db = path
+      this.read = storeReads(this.db)
+      return
+    }
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
     this.db = new DatabaseSync(path)
     this.read = storeReads(this.db)
@@ -127,7 +133,7 @@ export class Store implements Repositories {
   /** Re-indexes which threads a Trigger belongs to, replacing any rows from an earlier save of the same Trigger. */
   private indexThreads(trigger: Trigger): void {
     this.db.prepare('DELETE FROM trigger_thread WHERE id=?').run(trigger.id)
-    const insert = this.db.prepare('INSERT OR IGNORE INTO trigger_thread VALUES (?,?,?,?)')
+    const insert = this.db.prepare('INSERT OR IGNORE INTO trigger_thread (thread,id,at,human) VALUES (?,?,?,?)')
     for (const ref of trigger.threads) insert.run(threadKey(ref), trigger.id, trigger.at, trigger.human ? 1 : 0)
   }
   private depth = 0
@@ -141,10 +147,16 @@ export class Store implements Repositories {
     const level = this.depth++
     const name = `orchestrator_atomic_${level}`
     this.committed[level] = []
-    this.db.exec(`SAVEPOINT ${name}`)
+    const outerPostgres = this.db.dialect === 'postgres' && level === 0
+    this.db.exec(outerPostgres ? 'BEGIN' : `SAVEPOINT ${name}`)
     let value: T
-    try { value = operation(); this.db.exec(`RELEASE ${name}`) }
-    catch (error) { this.db.exec(`ROLLBACK TO ${name}`); this.db.exec(`RELEASE ${name}`); throw error }
+    try { value = operation(); this.db.exec(outerPostgres ? 'COMMIT' : `RELEASE ${name}`) }
+    catch (error) {
+      this.committed.splice(level)
+      if (outerPostgres) this.db.exec('ROLLBACK')
+      else { this.db.exec(`ROLLBACK TO ${name}`); this.db.exec(`RELEASE ${name}`) }
+      throw error
+    }
     finally { this.depth-- }
     const actions = this.committed.splice(level)[0]!
     if (level) this.committed[level - 1]!.push(...actions)
@@ -167,7 +179,7 @@ export class Store implements Repositories {
   }
   /** Writes a typed KV record under `name`. */
   set<V>(name: Key<V>, value: V): void {
-    this.db.prepare('INSERT INTO kv VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(name, JSON.stringify(value))
+    this.db.prepare('INSERT INTO kv (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(name, JSON.stringify(value))
   }
   /** Deletes the KV record at `name`. */
   delete(name: string): void { this.db.prepare('DELETE FROM kv WHERE key=?').run(name) }
@@ -201,15 +213,15 @@ export class Store implements Repositories {
   readonly triggers = {
     get: (id: string): Trigger | undefined => { const row = this.db.prepare('SELECT value FROM trigger WHERE id=?').get(id); return row ? JSON.parse(String(row.value)) as Trigger : undefined },
     save: (trigger: Trigger): void => this.atomic(() => {
-      this.db.prepare('INSERT INTO trigger VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value, at=excluded.at').run(trigger.id, JSON.stringify(trigger), trigger.at)
+      this.db.prepare('INSERT INTO trigger (id,value,at) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value, at=excluded.at').run(trigger.id, JSON.stringify(trigger), trigger.at)
       this.indexThreads(trigger)
     }),
     disposition: (id: string): TriggerDisposition | undefined => { const row = this.db.prepare('SELECT value FROM disposition WHERE id=?').get(id); return row ? JSON.parse(String(row.value)) as TriggerDisposition : undefined },
-    saveDisposition: (id: string, value: TriggerDisposition): void => { this.db.prepare('INSERT INTO disposition VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(id, JSON.stringify(value)) },
+    saveDisposition: (id: string, value: TriggerDisposition): void => { this.db.prepare('INSERT INTO disposition (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(id, JSON.stringify(value)) },
   }
   readonly threads = {
     get: (keyValue: string): Thread | undefined => { const row = this.db.prepare('SELECT value FROM thread WHERE key=?').get(keyValue); return row ? JSON.parse(String(row.value)) as Thread : undefined },
-    save: (thread: Thread): void => { this.db.prepare('INSERT INTO thread VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(thread.key, JSON.stringify(thread)) },
+    save: (thread: Thread): void => { this.db.prepare('INSERT INTO thread (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(thread.key, JSON.stringify(thread)) },
     list: (): Thread[] => this.db.prepare('SELECT value FROM thread ORDER BY rowid').all().map(row => JSON.parse(String(row.value)) as Thread),
     active: (): Thread[] => this.values('SELECT value FROM thread WHERE active = 1 ORDER BY rowid'),
     /** Updates human-facing thread metadata (`label`, `url`, and `facts`, where `null` removes a fact by ID); no-op if the thread does not exist. */
@@ -232,7 +244,7 @@ export class Store implements Repositories {
   }
   readonly tickets = {
     get: (id: string): Ticket | undefined => { const row = this.db.prepare('SELECT value FROM ticket WHERE id=?').get(id); return row ? JSON.parse(String(row.value)) as Ticket : undefined },
-    save: (ticket: Ticket): void => { this.db.prepare('INSERT INTO ticket VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(ticket.id, JSON.stringify(ticket)) },
+    save: (ticket: Ticket): void => { this.db.prepare('INSERT INTO ticket (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(ticket.id, JSON.stringify(ticket)) },
     /** Newest first. */
     list: (): Ticket[] => this.values('SELECT value FROM ticket ORDER BY rowid DESC'),
     /** Newest first. */
@@ -242,7 +254,7 @@ export class Store implements Repositories {
   }
   readonly decisions = {
     get: (id: string): Decision | undefined => { const row = this.db.prepare('SELECT value FROM decision WHERE id=?').get(id); return row ? JSON.parse(String(row.value)) as Decision : undefined },
-    save: (decision: Decision): void => { this.db.prepare('INSERT INTO decision VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value, thread=excluded.thread').run(decision.id, decision.threadKey, JSON.stringify(decision)) },
+    save: (decision: Decision): void => { this.db.prepare('INSERT INTO decision (id,thread,value) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value, thread=excluded.thread').run(decision.id, decision.threadKey, JSON.stringify(decision)) },
     byThread: (threadKeyValue: string): Decision[] => this.db.prepare('SELECT value FROM decision WHERE thread=? ORDER BY rowid').all(threadKeyValue).map(row => JSON.parse(String(row.value)) as Decision),
   }
   /** Read-only queries for management views, orchestrator tools, and source polling (see `storeReads`). */
