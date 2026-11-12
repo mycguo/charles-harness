@@ -36,6 +36,8 @@ DSH_HOME="$HOME/.dsh_charles" pnpm dsh plugin --profile superagent add file:"$PW
 
 Restart with the command above. The profile owns its installed files; it does not link to the snapshot's source directory.
 
+For the existing Tebra Google Cloud VM, follow [the Harness replacement guide](../docs/cookbook/deploy-google-cloud.md).
+
 ## Single-account mode
 
 Enable **Superagent → Settings → Sources → GitHub → Single-account mode** when the operator and agent share a GitHub account. Add that login to the GitHub Policy allowed list, then start each new request or follow-up with `/superagent` followed by instructions on the first nonblank line. The mode defaults to off; marked agent output stays excluded.

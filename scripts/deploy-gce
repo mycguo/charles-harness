@@ -1,0 +1,538 @@
+#!/usr/bin/env python3
+# MIT License
+#
+# Copyright (c) 2026 DeepSeek Harness Team
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+"""Deploy a GitHub branch or PR to the existing GCE VM using the caller's gcloud login.
+
+The same file runs as a durable systemd job on the VM. Candidate code and build
+scripts run as superagent; only the service and release-pointer operations use root.
+
+Adapted from mycguo/tebra-superagent scripts/deploy-gce (MIT). The existing
+Superagent bundle, profile, Google login, PostgreSQL and Caddy remain installed;
+this tool switches only the charles-harness checkout after the one-time adoption
+in docs/cookbook/deploy-google-cloud.md.
+"""
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+
+REPOSITORY_NAME = 'mycguo/charles-harness'
+REPOSITORY = 'https://github.com/' + REPOSITORY_NAME + '.git'
+SERVICE = 'tebra-superagent.service'
+DEPLOY_SERVICE = 'charles-harness-deploy.service'
+DEFAULT_URL = 'https://superagent.joboffermaster.com'
+
+
+class DeployError(Exception):
+    pass
+
+
+def branch_name(value):
+    if (not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,199}', value)
+            or any(part in value for part in ('..', '//', '@{'))
+            or any(part.startswith('.') or part.endswith(('.', '.lock')) for part in value.split('/'))
+            or value.endswith('/')):
+        raise argparse.ArgumentTypeError('Use a branch name such as master or codex/my-change, not a URL, SHA, or PR number.')
+    return value
+
+
+def pr_number(value):
+    if not re.fullmatch(r'[1-9][0-9]{0,9}', str(value)):
+        raise argparse.ArgumentTypeError('Use a positive PR number, such as --pr 22.')
+    return int(value)
+
+
+def origin(value):
+    url = urllib.parse.urlsplit(value)
+    if (url.scheme != 'https' or not url.hostname or url.username or url.password
+            or url.path not in ('', '/') or url.query or url.fragment):
+        raise argparse.ArgumentTypeError('The public URL must be an exact HTTPS origin.')
+    return value.rstrip('/')
+
+
+def atomic_json(path, value):
+    temporary = path.with_name(path.name + '.tmp-' + uuid.uuid4().hex)
+    with temporary.open('x', encoding='utf8') as output:
+        os.chmod(temporary, 0o600)
+        json.dump(value, output, indent=2)
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temporary, path)
+
+
+def read_json(path, default=None):
+    return json.loads(path.read_text()) if path.exists() else default
+
+
+class Host:
+    def __init__(self, public_url=DEFAULT_URL):
+        self.app = Path('/opt/charles-harness')
+        self.home = Path('/var/lib/tebra-superagent')
+        self.releases = Path('/opt/charles-harness-releases')
+        self.control = Path('/var/lib/charles-harness-deploy')
+        self.public_url = public_url
+        self.loopback_url = 'http://127.0.0.1:3082'
+        self.repo = REPOSITORY
+        self.log = None
+        self.health_timeout = 90
+
+    @property
+    def state_file(self):
+        return self.control / 'state.json'
+
+    def execute(self, argv, cwd=None, capture=False, timeout=1200):
+        try:
+            result = subprocess.run(argv, cwd=cwd, check=True, text=True, timeout=timeout,
+                                    stdout=subprocess.PIPE if capture else self.log,
+                                    stderr=self.log or subprocess.DEVNULL)
+            return result.stdout.strip() if capture else ''
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            # Build output stays in the private VM log, never in an exception containing secrets.
+            raise DeployError(f'{Path(argv[0]).name} failed; inspect the private deployment log.') from error
+
+    def as_user(self, argv, cwd=None, capture=False):
+        environment = ['HOME=' + str(self.home), 'USER=superagent', 'LOGNAME=superagent',
+                       'PATH=/usr/local/bin:/usr/bin:/bin', 'GIT_TERMINAL_PROMPT=0',
+                       'GH_CONFIG_DIR=' + str(self.home / '.config/gh-agent')]
+        return self.execute(['runuser', '-u', 'superagent', '--', 'env', '-i', *environment, *argv], cwd or self.home, capture)
+
+    def own(self, path):
+        import pwd
+        account = pwd.getpwnam('superagent')
+        os.chown(path, account.pw_uid, account.pw_gid)
+
+    def git(self, *args, cwd=None, capture=False):
+        helper = '!' + str(self.home / '.local/bin/gh-agent') + ' auth git-credential'
+        return self.as_user(['git', '-c', 'credential.helper=',
+                             '-c', 'credential.https://github.com.helper=' + helper, *args], cwd, capture)
+
+    def resolve_pr(self, number):
+        try:
+            output = self.as_user([str(self.home / '.local/bin/gh-agent'), 'api',
+                                   'repos/' + REPOSITORY_NAME + '/pulls/' + str(number)], capture=True)
+        except DeployError as error:
+            raise DeployError(f'Cannot read PR #{number}. Check its number and the VM gh-agent repository access.') from error
+        try:
+            pr = json.loads(output)
+            head, base = pr['head'], pr['base']
+            if pr['number'] != number or base['repo']['full_name'].lower() != REPOSITORY_NAME.lower():
+                raise ValueError('Unexpected PR repository')
+            if pr['state'] != 'open':
+                raise DeployError(f'PR #{number} is not open. Deploy merged code with --branch master.')
+            if not head.get('repo') or head['repo']['full_name'].lower() != REPOSITORY_NAME.lower():
+                raise DeployError('PR deployment supports branches in this repository; fork or deleted head repositories are not accepted.')
+            if (not isinstance(head['sha'], str) or not re.fullmatch(r'[0-9a-f]{40}', head['sha'])
+                    or not isinstance(head['ref'], str) or not head['ref']):
+                raise ValueError('Invalid PR head')
+            return {'pr': number, 'branch': head['ref'], 'commit': head['sha'], 'ref': f'refs/pull/{number}/head'}
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise DeployError('GitHub returned invalid PR metadata; no code was deployed.') from error
+
+    def service(self, action):
+        self.execute(['systemctl', action, SERVICE], timeout=330)
+
+    def active(self):
+        return self.execute(['systemctl', 'is-active', SERVICE], capture=True, timeout=10) == 'active'
+
+    def health(self):
+        # The agent owns this directory. Read as that user so a symlink cannot disclose a root-only file.
+        token = self.as_user(['cat', str(self.home / '.dsh/state/google-login/3082.token')], capture=True)
+        if not re.fullmatch(r'[A-Za-z0-9_-]{43}', token):
+            raise DeployError('The private health token is missing or invalid.')
+        request = urllib.request.Request(self.loopback_url + '/orchestrator/api/state', headers={
+            'x-orchestrator-request': '1', 'x-superagent-control': token})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return json.load(response)
+
+    def public_health(self):
+        # Validate TLS and Google admission, without following an OAuth redirect or sending a model request.
+        with urllib.request.urlopen(self.public_url + '/', timeout=10) as response:
+            if response.status != 200 or b'/auth/google/start' not in response.read():
+                raise DeployError('Public HTTPS did not serve the Google sign-in page.')
+        request = urllib.request.Request(self.public_url + '/orchestrator/api/state', headers={
+            'x-orchestrator-request': '1', 'Origin': self.public_url})
+        try:
+            urllib.request.urlopen(request, timeout=10).close()
+        except urllib.error.HTTPError as error:
+            if error.code == 401:
+                return
+        raise DeployError('Public management API did not require Google sign-in.')
+
+    def wait_healthy(self, required_parts):
+        deadline = time.monotonic() + self.health_timeout
+        while time.monotonic() < deadline:
+            try:
+                state = self.health()
+                parts = state.get('health', {})
+                if (self.active() and parts.get('runtime', {}).get('state') in ('ready', 'paused')
+                        and required_parts <= parts.keys()):
+                    self.public_health()
+                    return state
+            except (OSError, ValueError, urllib.error.URLError, DeployError):
+                pass
+            time.sleep(min(2, max(0, deadline - time.monotonic())))
+        raise DeployError('Startup check failed: runtime, loaded Sources, HTTPS, or Google admission is unavailable.')
+
+    def current(self):
+        state = read_json(self.state_file, {})
+        if state.get('pending'):
+            raise DeployError('An interrupted activation needs recovery. Run --rollback first.')
+        if self.app.is_symlink():
+            target = self.app.resolve(strict=True)
+            recorded = state.get('current', {}).get('path')
+            if target.parent != self.releases.resolve() or not recorded or Path(recorded).resolve() != target:
+                raise DeployError('The live release link does not match the deployment record.')
+        else:
+            target = self.app
+        commit = self.git('rev-parse', 'HEAD', cwd=target, capture=True)
+        if not re.fullmatch(r'[0-9a-f]{40}', commit):
+            raise DeployError('Cannot determine the installed commit.')
+        current = {'path': str(target), 'commit': commit,
+                   'branch': state.get('current', {}).get('branch', 'existing-checkout')}
+        if 'pr' in state.get('current', {}):
+            current['pr'] = state['current']['pr']
+        return state, current
+
+    def clean(self, path):
+        if self.git('status', '--porcelain', '--untracked-files=normal', cwd=path, capture=True):
+            raise DeployError('The installed checkout has local changes; preserve them before deploying.')
+        if (Path(path) / '.env').exists():
+            raise DeployError('Move checkout .env settings into the private systemd environment file before deploying.')
+
+    def idle(self):
+        state = self.health()
+        if state.get('health', {}).get('runtime', {}).get('state') not in ('ready', 'paused'):
+            raise DeployError('The current runtime is not healthy enough to check for active workers.')
+        running = state.get('load', {}).get('running')
+        if not isinstance(running, int) or running != 0:
+            raise DeployError('Workers are running. Pause processing and wait for them to finish before deploying.')
+        return state
+
+    def preflight(self):
+        if not self.active():
+            raise DeployError('Start the existing app before deploying so its baseline can be checked.')
+        for key, expected in [('User', 'superagent'), ('WorkingDirectory', str(self.app))]:
+            actual = self.execute(['systemctl', 'show', SERVICE, '--property=' + key, '--value'], capture=True)
+            if actual != expected:
+                raise DeployError('The systemd service must use superagent and /opt/charles-harness; install the runtime drop-in first.')
+        command = self.execute(['systemctl', 'show', SERVICE, '--property=ExecStart', '--value'], capture=True)
+        if '/usr/local/bin/pnpm dsh --profile superagent --host 127.0.0.1 --port 3082 --no-open' not in command:
+            raise DeployError('The service must launch the source Harness with the supplied runtime drop-in.')
+        environment = shlex.split(self.execute(['systemctl', 'show', SERVICE, '--property=Environment', '--value'], capture=True))
+        if 'DSH_HOME=' + str(self.home / '.dsh') not in environment:
+            raise DeployError('The service must retain DSH_HOME=/var/lib/tebra-superagent/.dsh.')
+        bundle = self.home / '.dsh/profiles/superagent/node_modules/dsh-superagent'
+        if not bundle.is_symlink() or Path(os.path.abspath(bundle.parent / os.readlink(bundle))) != Path('/opt/tebra-superagent'):
+            raise DeployError('Keep the existing dsh-superagent link to /opt/tebra-superagent; see the replacement guide.')
+        state, current = self.current()
+        self.clean(current['path'])
+        if not self.built(Path(current['path'])):
+            raise DeployError('Build the installed Harness checkout before deploying.')
+        if shutil.disk_usage(self.app.parent).free < 20 * 1024 ** 3:
+            raise DeployError('At least 20 GiB of free disk space is required for a candidate release.')
+        baseline = self.idle()
+        self.public_health()
+        return state, current, set(baseline['health'])
+
+    def prepare(self, branch, job_id, report, pr_target=None):
+        self.releases.mkdir(mode=0o755, exist_ok=True)
+        if self.releases.is_symlink() or self.releases.stat().st_uid != 0 or self.releases.stat().st_mode & 0o022:
+            raise DeployError('The releases directory must be owned by root and not writable by other users.')
+        candidate = self.releases / ('release-' + job_id)
+        candidate.mkdir(mode=0o700)
+        self.own(candidate)
+        if pr_target:
+            report('Fetching PR #' + str(pr_target['pr']) + ' at ' + pr_target['commit'][:12])
+            self.git('init', str(candidate))
+            self.git('remote', 'add', 'origin', self.repo, cwd=candidate)
+            self.git('fetch', '--depth=1', '--no-tags', 'origin', pr_target['ref'], cwd=candidate)
+            fetched = self.git('rev-parse', 'FETCH_HEAD', cwd=candidate, capture=True)
+            if fetched != pr_target['commit']:
+                raise DeployError('The PR head changed during fetch. Rerun the command to deploy the current PR head; the live app was not switched.')
+            self.git('checkout', '--detach', fetched, cwd=candidate)
+        else:
+            report('Fetching branch ' + branch)
+            self.git('clone', '--depth=1', '--no-tags', '--single-branch', '--branch', branch,
+                     self.repo, str(candidate))
+        if (candidate / '.env').exists():
+            raise DeployError('The branch must not contain a checkout .env; keep VM credentials in its private environment file.')
+        commit = self.git('rev-parse', 'HEAD', cwd=candidate, capture=True)
+        if not re.fullmatch(r'[0-9a-f]{40}', commit):
+            raise DeployError('Cannot determine the candidate commit.')
+        report('Installing dependencies for ' + commit[:12])
+        self.as_user(['pnpm', 'install', '--frozen-lockfile'], cwd=candidate)
+        report('Checking deployment tests')
+        self.as_user(['pnpm', 'exec', 'vitest', 'run', 'scripts/deploy-gce.spec.ts', '--maxWorkers=2'], cwd=candidate)
+        report('Building ' + commit[:12])
+        self.as_user(['pnpm', 'build'], cwd=candidate)
+        if not self.built(candidate):
+            raise DeployError('The build did not produce the Harness CLI and Web frontend.')
+        self.clean(candidate)
+        result = {'path': str(candidate), 'commit': commit, 'branch': branch}
+        if pr_target:
+            result['pr'] = pr_target['pr']
+        return result
+
+    def built(self, path):
+        return all((path / file).is_file() for file in ('apps/cli/lib/bin.js', 'apps/web/dist/index.html'))
+
+    def link(self, release):
+        target = Path(release['path'])
+        if target.resolve().parent != self.releases.resolve() or not self.built(target):
+            raise DeployError('Refusing an invalid release path or missing build.')
+        temporary = self.app.with_name('.charles-harness-next-' + uuid.uuid4().hex)
+        temporary.symlink_to(target)
+        os.replace(temporary, self.app)
+
+
+def activate(host, state, current, target, parts, report):
+    """Checkpoint rollback information before any change to the running application."""
+    original = dict(current)
+    if not host.app.is_symlink():
+        original['path'] = str(host.releases / ('legacy-' + uuid.uuid4().hex))
+    pending = {**state, 'pending': {'target': target, 'restore': original, 'parts': sorted(parts)}}
+    atomic_json(host.state_file, pending)
+    try:
+        report('Stopping app and activating ' + target['commit'][:12])
+        host.service('stop')
+        if not host.app.is_symlink():
+            host.app.rename(original['path'])
+        host.link(target)
+        host.service('start')
+        report('Checking runtime, Sources, HTTPS and Google sign-in')
+        healthy = host.wait_healthy(parts)
+        atomic_json(host.state_file, {'current': target, 'previous': original})
+        return {'current': target, 'previous': original, 'setupPending': bool(healthy.get('setup', {}).get('problem'))}
+    except Exception as error:
+        report('Activation failed; restoring previous code')
+        try:
+            host.service('stop')
+            restored = original
+            if Path(original['path']).exists():
+                host.link(original)
+            elif host.app.is_dir() and not host.app.is_symlink():
+                # A stop failure can happen before the first checkout is moved into releases.
+                restored = current
+            else:
+                raise DeployError('The previous release cannot be located.')
+            host.service('start')
+            host.wait_healthy(parts)
+            atomic_json(host.state_file, {**state, 'current': restored})
+        except Exception as recovery:
+            raise DeployError('Activation and recovery failed. Rollback checkpoint retained; inspect the VM logs and run --rollback.') from recovery
+        raise DeployError('Activation failed; previous code restored and health verified. Database changes are not undone.') from error
+
+
+def rollout(host, request, report):
+    if request['action'] == 'rollback':
+        state = read_json(host.state_file, {})
+        pending = state.get('pending')
+        if pending:
+            target = pending['restore']
+            report('Recovering interrupted activation')
+            host.service('stop')
+            if not host.app.is_symlink() and host.app.is_dir() and not Path(target['path']).exists():
+                # The old checkout had not yet been moved when the worker was interrupted.
+                host.app.rename(target['path'])
+            host.link(target)
+            host.service('start')
+            host.wait_healthy(set(pending['parts']))
+            atomic_json(host.state_file, {'current': target, 'previous': state.get('previous')})
+            return {'current': target, 'recovered': True}
+        state, current, parts = host.preflight()
+        target = state.get('previous')
+        if not target:
+            raise DeployError('No previous deployment is recorded.')
+        host.clean(target['path'])
+    else:
+        state, current, parts = host.preflight()
+        if request.get('pr'):
+            pr_target = host.resolve_pr(request['pr'])
+            target = host.prepare(pr_target['branch'], request['id'], report, pr_target=pr_target)
+        else:
+            target = host.prepare(request['branch'], request['id'], report)
+        # Intake could have started work while the candidate was building.
+        host.idle()
+        host.clean(current['path'])
+    return activate(host, state, current, target, parts, report)
+
+
+def worker(host, request):
+    job_file = host.control / (request['id'] + '.json')
+    def report(phase):
+        atomic_json(job_file, {'id': request['id'], 'status': 'running', 'phase': phase})
+        print(phase, flush=True)
+    with (host.control / 'deploy.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            atomic_json(job_file, {'id': request['id'], 'status': 'failed', 'error': 'Another deployment holds the VM lock.'})
+            raise DeployError('Another deployment holds the VM lock.')
+        log_path = host.control / (request['id'] + '.log')
+        with log_path.open('x') as output:
+            os.chmod(log_path, 0o600)
+            host.log = output
+            try:
+                result = rollout(host, request, report)
+                atomic_json(job_file, {'id': request['id'], 'status': 'succeeded', **result})
+            except Exception as error:
+                message = str(error) if isinstance(error, DeployError) else 'Deployment failed unexpectedly; inspect the private VM log.'
+                atomic_json(job_file, {'id': request['id'], 'status': 'failed', 'error': message})
+                raise
+
+
+def remote(request):
+    if os.geteuid() != 0:
+        raise DeployError('The VM command needs sudo privileges.')
+    host = Host(request['url'])
+    if request['action'] == 'status':
+        last = read_json(host.control / 'last-job.json', {})
+        job = read_json(host.control / (last['id'] + '.json')) if last.get('id') else None
+        try:
+            health = host.health().get('health', {}).get('runtime')
+        except (OSError, ValueError, urllib.error.URLError, DeployError):
+            health = {'state': 'unavailable'}
+        try:
+            commit = host.git('rev-parse', 'HEAD', cwd=host.app, capture=True)
+        except DeployError:
+            commit = None
+        active = subprocess.run(['systemctl', 'is-active', '--quiet', DEPLOY_SERVICE]).returncode == 0
+        print(json.dumps({'deployment': read_json(host.state_file, {}), 'installedCommit': commit,
+                          'workerActive': active, 'lastJob': job, 'runtime': health}, indent=2))
+        return 0
+    if request.get('dry_run'):
+        state, current, _ = host.preflight()
+        if request['action'] == 'rollback':
+            target = state.get('previous')
+        elif request.get('pr'):
+            target = host.resolve_pr(request['pr'])
+            fetched = host.git('ls-remote', '--exit-code', host.repo, target['ref'], capture=True).split()[0]
+            if fetched != target['commit']:
+                raise DeployError('The PR head changed during preflight. Rerun the command.')
+        else:
+            target = {'branch': request['branch'], 'commit': host.git('ls-remote', '--exit-code', '--heads',
+                host.repo, 'refs/heads/' + request['branch'], capture=True).split()[0]}
+        if not target:
+            raise DeployError('No previous deployment is recorded.')
+        print(json.dumps({'dryRun': True, 'current': current, 'target': target, 'url': host.public_url}, indent=2))
+        return 0
+    host.control.mkdir(mode=0o700, exist_ok=True)
+    if host.control.is_symlink() or host.control.stat().st_uid != 0:
+        raise DeployError('The deployment control directory must be owned by root and must not be a symlink.')
+    os.chmod(host.control, 0o700)
+    active = subprocess.run(['systemctl', 'show', DEPLOY_SERVICE, '--property=ActiveState', '--value'],
+                            capture_output=True, text=True).stdout.strip()
+    if active in ('active', 'activating', 'deactivating', 'reloading'):
+        raise DeployError('Another deployment is active on the VM. Use --status to follow it.')
+    request['id'] = uuid.uuid4().hex
+    job_file = host.control / (request['id'] + '.json')
+    runner = host.control / (request['id'] + '.py')
+    # The worker uses this exact local tool version, not a script from the candidate branch.
+    runner.write_text(RUNNER_SOURCE)
+    os.chmod(runner, 0o600)
+    atomic_json(job_file, {'id': request['id'], 'status': 'running', 'phase': 'Starting deployment worker'})
+    host.execute(['systemd-run', '--unit=' + DEPLOY_SERVICE, '--collect', '--property=Type=exec',
+                  '/usr/bin/python3', str(runner), '--_worker', json.dumps(request)], timeout=15)
+    atomic_json(host.control / 'last-job.json', {'id': request['id']})
+    print('Deployment job: ' + request['id'], flush=True)
+    print('Private build log: ' + str(host.control / (request['id'] + '.log')), flush=True)
+    previous = None
+    while True:
+        job = read_json(job_file)
+        if job != previous:
+            print(json.dumps(job), flush=True)
+            previous = job
+        if job['status'] != 'running':
+            return 0 if job['status'] == 'succeeded' else 1
+        if subprocess.run(['systemctl', 'is-active', '--quiet', DEPLOY_SERVICE]).returncode != 0:
+            # A killed worker or VM shutdown can leave a checkpoint. Never wait forever for a dead job.
+            latest = read_json(job_file)
+            if latest['status'] == 'running':
+                atomic_json(job_file, {**latest, 'status': 'failed',
+                    'error': 'Deployment worker stopped. Inspect --status and use --rollback if activation was interrupted.'})
+        time.sleep(2)
+
+
+def main():
+    if len(sys.argv) == 3 and sys.argv[1] in ('--_remote', '--_worker'):
+        request = json.loads(sys.argv[2])
+        if request['action'] == 'deploy':
+            if request.get('pr'):
+                request['pr'] = pr_number(request['pr'])
+            else:
+                branch_name(request['branch'])
+        request['url'] = origin(request['url'])
+        if sys.argv[1] == '--_worker':
+            worker(Host(request['url']), request)
+            return 0
+        return remote(request)
+    parser = argparse.ArgumentParser(description=__doc__)
+    actions = parser.add_mutually_exclusive_group(required=True)
+    actions.add_argument('--branch', type=branch_name, help='Deploy a branch already pushed to origin.')
+    actions.add_argument('--pr', type=pr_number, help='Deploy the head commit of an open PR in this repository (for example --pr 22).')
+    actions.add_argument('--rollback', action='store_true', help='Restore the previous release or recover an interrupted activation.')
+    actions.add_argument('--status', action='store_true', help='Read the deployed commit and runtime health.')
+    parser.add_argument('--dry-run', action='store_true', help='Read-only preflight; do not build, stop or switch the app.')
+    parser.add_argument('--project', default='personal-ai-assistant-454604')
+    parser.add_argument('--zone', default='us-west2-c')
+    parser.add_argument('--instance', default='superagent')
+    parser.add_argument('--url', type=origin, default=DEFAULT_URL)
+    args = parser.parse_args()
+    for value in (args.project, args.zone, args.instance):
+        if not re.fullmatch(r'[a-z][a-z0-9-]{0,100}', value):
+            parser.error('Invalid project, zone or instance name.')
+    if args.status and args.dry_run:
+        parser.error('--status is already read-only; omit --dry-run.')
+    if not shutil.which('gcloud'):
+        raise DeployError('Install gcloud and sign in with your existing Google Cloud administrator account first.')
+    request = {'action': 'deploy' if args.branch or args.pr else 'rollback' if args.rollback else 'status',
+               'branch': args.branch, 'pr': args.pr, 'url': args.url, 'dry_run': args.dry_run}
+    source = Path(__file__).read_text()
+    payload = 'RUNNER_SOURCE = ' + repr(source) + '\n' + source
+    command = shlex.join(['sudo', '-n', '/usr/bin/python3', '-', '--_remote', json.dumps(request)])
+    argv = ['gcloud', 'compute', 'ssh', args.instance, '--project=' + args.project, '--zone=' + args.zone,
+            '--tunnel-through-iap', '--quiet', '--ssh-flag=-T', '--ssh-flag=-oBatchMode=yes', '--command=' + command]
+    print(f'{request["action"]}: {args.project}/{args.zone}/{args.instance} → {args.url}', flush=True)
+    return subprocess.run(argv, input=payload, text=True).returncode
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (DeployError, OSError, ValueError) as error:
+        message = str(error) if isinstance(error, DeployError) else 'Operation failed; inspect the VM deployment log and service status.'
+        print('GCE deployment: ' + message, file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print('\nDisconnected. Any launched deployment worker continues on the VM; use --status and the VM deployment logs.', file=sys.stderr)
+        sys.exit(130)
