@@ -15,6 +15,8 @@ The Source records whether a message addresses the agent: `mention` for a mentio
 - Other human messages use the admission table for their receiving scope.
 - A bot on the Source's bot list can produce an inferred candidate, never an explicit request. Other bots are not admitted.
 
+With **Single-account mode** enabled on the GitHub Source, `/superagent <request>` at the start of the first nonblank line also addresses the agent. This is the only activity received from the signed-in account: ordinary comments, reviews and Issue/PR descriptions from that account remain ignored. Commands count as human requests and use the same allowed list and admission table as other addressed messages. The operator can command work on their own or a teammate's PR by posting a new comment, and must use the command again for follow-ups and stop requests. Without this mode, messages from the signed-in account remain excluded.
+
 ### Subscriptions: continuing existing work
 
 Every message on a subscribed Thread reaches its subscribed Tickets as context, including messages from bots and CI. This delivery bypasses the gate and grants no new authority. Each Ticket remains limited by its Mandate.

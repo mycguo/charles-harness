@@ -5,7 +5,7 @@ import { backfillChat, consumerRetry, feishuKind, feishuTriggerId, feishuRef, fe
 import { KV } from '../src/kv.ts'
 import { apply as applyFeishu, pollThreads as pollFeishuThreads } from '../src/sources/feishu.ts'
 import { runFeishu } from '../src/sources/feishu-loops.ts'
-import { commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
+import { commentTrigger, githubAddress, githubChannel, githubCommand, githubInput, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
 import { claimPull, observePull, pullEndNotices, pullOf, ticketBranch, type Pull } from '../src/sources/github-pull.ts'
 import { ciCounts, ciFact, ciSummary } from '../src/sources/github-read.ts'
 import { apply as applyGithub, githubKind, pollFailure, pollRound } from '../src/sources/github.ts'
@@ -325,6 +325,29 @@ describe('feishu source', () => {
   })
 })
 describe('github source', () => {
+  it('recognizes only explicit unmarked single-account commands, including follow-ups', () => {
+    const own = (body: string) => ({ id: 1, body, user: { login: 'Agent-Bot', type: 'User' } })
+    expect(githubKind.schema.parse({})).toMatchObject({ allowSelfRequests: false })
+    for (const body of ['/superagent review this PR', '\n\r\n/superagent stop', '/superagent fix this\nKeep the API compatible.']) {
+      expect(githubCommand(body)).toBe(true)
+      expect(githubInput(own(body), 'agent-bot')).toBe(false)
+      expect(githubInput(own(body), 'agent-bot', true)).toBe(true)
+      for (const kind of ['conversation', 'inline', 'review'] as const) {
+        expect(commentTrigger(own(body), { number: 7, isPr: true }, kind, 'agent-bot', true))
+          .toMatchObject({ human: true, addressed: 'mention', actor: { id: 'Agent-Bot' }, meta: { number: 7, isPr: true } })
+      }
+    }
+    for (const body of ['', '/superagent', '/superagent \n', '/superagent-extra review', 'Please /superagent review',
+      '> /superagent review', '```\n/superagent review\n```', '    /superagent review', '@agent-bot review',
+      '/superagent review\n\n<!-- dsh-superagent:ack:ticket -->', '/superagent review\n\n<!-- dsh-superagent:worker -->']) {
+      expect(githubCommand(body)).toBe(false)
+      expect(githubInput(own(body), 'agent-bot', true)).toBe(false)
+    }
+    expect(githubInput({ ...own('/superagent review'), user: { login: 'agent-bot', type: 'Bot' } }, 'agent-bot', true)).toBe(false)
+    const other = { ...own('/superagent review'), user: { login: 'alice', type: 'User' } }
+    expect(commentTrigger(other, { number: 7, isPr: true }, 'conversation', 'agent-bot', true))
+      .toMatchObject({ human: true, addressed: 'mention', actor: { id: 'alice' } })
+  })
   it('normalizes comments and reviews into triggers with review-thread channels, and marks only GitHub Apps and machine accounts as automated', () => {
     const trigger = commentTrigger({ id: 5, body: 'nit', user: { login: 'review-bot[bot]', type: 'Bot' }, html_url: 'https://github.com/acme/widgets/pull/7#discussion_r5', updated_at: '2026-09-01T00:00:00Z' }, { number: 7, isPr: true, prAuthor: 'agent-bot' }, 'inline', 'agent-bot')
     expect(trigger).toMatchObject({ source: 'github', threads: [{ source: 'github', id: '7' }], human: false, channel: { address: { number: '7', url: 'https://github.com/acme/widgets/pull/7#discussion_r5' } }, meta: { commentId: 5, kind: 'inline', prAuthor: 'agent-bot' } })
@@ -1023,7 +1046,7 @@ it('reports GitHub as failing only after the configured number of consecutive fa
   expect(pollFailure(1, 3, eof)).toBeUndefined()
   expect(pollFailure(2, 3, eof)).toBeUndefined()
   expect(pollFailure(3, 3, eof)).toEqual({ state: 'error', detail: '3 consecutive failed polls; last: Error: Get "https://api.github.com/x": EOF', code: 'pollFailures', values: { count: '3', error: 'Error: Get "https://api.github.com/x": EOF' } })
-  expect(githubKind.schema.parse({})).toEqual({ repository: '', cli: '', pollSeconds: 60, failuresBeforeError: 3, observeIssues: false,
+  expect(githubKind.schema.parse({})).toEqual({ repository: '', cli: '', pollSeconds: 60, failuresBeforeError: 3, allowSelfRequests: false, observeIssues: false,
     observePulls: false, observeComments: false, observeCi: false })
 })
 describe('feishu event consumer', () => {
@@ -1213,6 +1236,83 @@ describe('observing the GitHub repository', () => {
     })
     return calls
   }
+  it('discovers single-account commands on own and teammate PRs without notifications or receive-all switches', async () => {
+    const h = host()
+    observe(h, { allowSelfRequests: true })
+    const settings = h.store.settings()
+    h.store.saveSettings({ ...settings, eval: { ...settings.eval, mode: 'observe' }, policy: { ...settings.policy,
+      sources: { ...settings.policy.sources, github: { allowed: [{ id: 'agent-bot' }] } } } })
+    h.store.set(KV.github.stream('issues'), { since: at(0), started: { issues: at(0), pulls: at(0) } })
+    for (const stream of ['comments', 'review-comments']) h.store.set(KV.github.stream(stream), { since: at(0), started: { comments: at(0) } })
+    const comment = (id: number, body: string, number: number) => ({ id, body, user: { login: 'agent-bot' }, created_at: at(2), updated_at: at(2),
+      issue_url: `https://api.github.com/repos/acme/widgets/issues/${number}`, html_url: `https://github.com/acme/widgets/pull/${number}#issuecomment-${id}` })
+    const calls = repository(h, {
+      issues: [
+        { ...issue(4, { body: '/superagent investigate this', user: { login: 'agent-bot' }, created_at: at(1), updated_at: at(1) }), pull_request: { url: 'x' } },
+        issue(5, { body: '/superagent fix this', user: { login: 'agent-bot' }, created_at: at(1), updated_at: at(1) }),
+        issue(6, { body: '/superagent fix this\n\n<!-- dsh-superagent:worker -->', user: { login: 'agent-bot' }, created_at: at(1), updated_at: at(1) }),
+        issue(7, { body: 'ordinary team discussion', created_at: at(1), updated_at: at(1) }),
+      ],
+      // Commands can address the account's own PR (#4) or a teammate's existing PR (#20).
+      comments: [comment(10, '/superagent review this PR', 4), comment(11, '/superagent fix the regression', 20),
+        comment(12, '@agent-bot ordinary mention', 4), comment(13, '/superagent repeated request\n\n<!-- dsh-superagent:reply:1 -->', 4),
+        { ...comment(14, '/superagent review this PR', 21), user: { login: 'stranger' } }],
+      reviewComments: [{ ...comment(15, '/superagent use a bounded query', 20), path: 'src/a.ts', line: 4,
+        pull_request_url: 'https://api.github.com/repos/acme/widgets/pulls/20' }],
+    })
+    await pollRound(h)
+    const triggers = h.receive.mock.calls.map(([trigger]) => trigger)
+    expect(triggers.map(trigger => [trigger.meta.number, trigger.meta.kind])).toEqual([
+      [4, 'pull'], [5, 'issue'], [4, 'conversation'], [20, 'conversation'], [21, 'conversation'], [20, 'inline'],
+    ])
+    expect(triggers.every(trigger => trigger.human && trigger.addressed === 'mention')).toBe(true)
+    const policy = settingsPolicy(h.store.settings(), h.sources)
+    for (const trigger of triggers) {
+      const result = policy.gate(trigger, h.store.threads.get(`github:${trigger.meta.number}`)!, [])
+      expect(result).toMatchObject(trigger.actor.id === 'agent-bot' ? { admissible: true, strength: 'explicit' } : { admissible: false })
+    }
+    const ownPr = triggers[0]!
+    expect(githubKind.environment!.values({ deployment: h.deployment, trigger: ownPr } as never))
+      .toMatchObject({ DSH_SUPERAGENT_GITHUB_PR_HEAD: 'refs/pull/4/head' })
+    expect(triggers.every(trigger => h.store.triggers.get(trigger.id)?.id === trigger.id)).toBe(true)
+    h.receive.mockClear()
+    for (const stream of ['issues', 'comments', 'review-comments']) {
+      const { etag: _etag, ...cursor } = h.store.get(KV.github.stream(stream))!
+      h.store.set(KV.github.stream(stream), cursor)
+    }
+    await pollRound(h)
+    expect(h.receive).toHaveBeenCalledTimes(triggers.length)
+    expect(await Promise.all(h.receive.mock.results.map(result => result.value))).toEqual(triggers.map(() => 'duplicate'))
+    expect(calls.some(args => args[1]?.startsWith('repos/acme/widgets/issues/comments?'))).toBe(true)
+    observe(h, {})
+    await pollRound(h)
+    for (const stream of ['issues', 'comments', 'review-comments']) expect(h.store.get(KV.github.stream(stream))).toBeUndefined()
+    h.store.close()
+  })
+
+  it('accepts shared-account requests through notifications and subscribed PR reviews, but never marked replies', async () => {
+    const h = host()
+    observe(h, { allowSelfRequests: true })
+    h.store.set(KV.github.since, at(0))
+    subscribed(h, { source: 'github', id: '9' }, { isPr: true, title: 'Review this' })
+    h.store.set(KV.github.cursor(9), at(0))
+    const own = { login: 'agent-bot' }
+    const comment = (id: number, body: string) => ({ id, body, user: own, created_at: at(1), updated_at: at(1) })
+    github(h, { notifications: [notification(12), notification(13, 'pulls')], issues: [], 'issues/comments': [], 'pulls/comments': [],
+      'issues/12': issue(12, { body: '/superagent investigate', created_at: at(1), updated_at: at(1), user: own }),
+      'pulls/13': { ...openPull(13), user: own, body: '/superagent review my PR', created_at: at(1) },
+      'pulls/9': { ...openPull(9), user: own },
+      'issues/9/comments': [comment(90, '/superagent fix the error'), comment(91, '/superagent fix the error\n\n<!-- dsh-superagent:ack:1 -->')],
+      'pulls/9/comments': [comment(92, '/superagent preserve this interface')],
+      'pulls/9/reviews': [comment(93, '/superagent add a regression test'), comment(94, 'Automated findings\n\n<!-- dsh-superagent:worker -->')],
+    })
+    await pollRound(h)
+    expect(h.receive.mock.calls.map(([trigger]) => [trigger.meta.number, trigger.meta.kind, trigger.human, trigger.addressed]))
+      .toEqual([[13, 'pull', true, 'mention'], [12, 'issue', true, 'mention'], [9, 'conversation', true, 'mention'],
+        [9, 'inline', true, 'mention'], [9, 'review', true, 'mention']])
+    h.store.close()
+  })
+
   it('takes in the new Issues and PRs from when it started observing them, and asks again with the ETag while nothing is newer',
     async () => {
     const h = host()

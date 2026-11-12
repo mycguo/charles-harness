@@ -162,9 +162,9 @@ it('lists each Source\'s bots next to its people and saves them, and sets the Gi
   await click(tab(zh['tab.settings']))
   // The GitHub Source receives only what is addressed to the agent until a switch opens a scope of the repository.
   const github = all('.dt-card').find(card => card.querySelector('.dt-card-title')?.textContent === 'GitHub')!
-  expect([...github.querySelectorAll('.dt-switch-row')].map(row => row.textContent)).toEqual(['接收仓库里的新 Issue', '接收仓库里的新 PR',
+  expect([...github.querySelectorAll('.dt-switch-row')].map(row => row.textContent)).toEqual(['单账号模式', '接收仓库里的新 Issue', '接收仓库里的新 PR',
     '接收仓库里的评论', '接收默认分支的 CI'])
-  expect([...github.querySelectorAll('[role="switch"]')].slice(1).map(item => item.getAttribute('aria-checked'))).toEqual(['false', 'false',
+  expect([...github.querySelectorAll('[role="switch"]')].slice(1).map(item => item.getAttribute('aria-checked'))).toEqual(['false', 'false', 'false',
     'false', 'false'])
   await click(find(zh['term.eval'], '.dt-settings-link'))
   const lists = () => all('.dt-part > .dt-field .dt-subhead .dt-field-head').map(head => head.firstChild?.textContent)
@@ -197,7 +197,7 @@ it('shows the GitHub Source\'s switches for what it receives across the reposito
   await click(tab(en['tab.settings']))
   const github = all('.dt-card').find(card => card.querySelector('.dt-card-title')?.textContent === 'GitHub')!
   expect([...github.querySelectorAll('.dt-switch-row')].map(row => [row.textContent, row.querySelector('[role="switch"]')
-    ?.getAttribute('aria-checked')])).toEqual([['Receive new Issues in the repository', 'true'],
+    ?.getAttribute('aria-checked')])).toEqual([['Single-account mode', 'false'], ['Receive new Issues in the repository', 'true'],
     ['Receive new pull requests in the repository', 'false'], ['Receive comments in the repository', 'false'],
     ['Receive the default branch\'s CI', 'true']])
   await click(find('Receive comments in the repository', '[role="switch"]'))

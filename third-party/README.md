@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The original DeepSeek Superagent prototype is copied into [dsh-superagent](dsh-superagent/README.md). [dsh-superagent.source.json](dsh-superagent.source.json) records the upstream commit and source tree. The 216-file snapshot preserves the upstream source and MIT license; the source record lists one trailing-space cleanup. This snapshot stays outside the Harness pnpm workspace and has its own locked dependencies.
+The original DeepSeek Superagent prototype is copied into [dsh-superagent](dsh-superagent/README.md). [dsh-superagent.source.json](dsh-superagent.source.json) records the upstream commit and source tree. The 216-file snapshot preserves the upstream source and MIT license; the source record lists local changes, including the opt-in Single-account mode port. This snapshot stays outside the Harness pnpm workspace and has its own locked dependencies.
 
 The `superagent` profile under `~/.dsh_charles` uses a packaged installation of this snapshot. It has no dependency on `~/dev/tebra-superagent`. Its separate state directory is `~/.dsh_charles/state/superagent-prototype`.
 
@@ -35,3 +35,7 @@ DSH_HOME="$HOME/.dsh_charles" pnpm dsh plugin --profile superagent add file:"$PW
 ```
 
 Restart with the command above. The profile owns its installed files; it does not link to the snapshot's source directory.
+
+## Single-account mode
+
+Enable **Superagent → Settings → Sources → GitHub → Single-account mode** when the operator and agent share a GitHub account. Add that login to the GitHub Policy allowed list, then start each new request or follow-up with `/superagent` followed by instructions on the first nonblank line. The mode defaults to off; marked agent output stays excluded.

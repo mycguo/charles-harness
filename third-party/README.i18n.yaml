@@ -3,11 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write third-party/README.md
 /local-superagent-installation:
-  en: c5f228d79efc9d0d
-  zh: f7d31dc6a0de70c4
+  en: b9c9da2b42be217b
+  zh: 773ea29659ca47ff
 /local-superagent-installation/start-or-restart:
   en: 8c614b514eb73e16
   zh: 921c1d96cf1bd84d
 /local-superagent-installation/rebuild-the-package:
   en: 624c5f9a94211005
   zh: 701dad7623f97ef7
+/local-superagent-installation/single-account-mode:
+  en: 5a5c21b9f4038195
+  zh: 319f30be5f2571b0
