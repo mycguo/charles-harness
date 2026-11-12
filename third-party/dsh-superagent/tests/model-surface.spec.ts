@@ -347,6 +347,15 @@ function failures(): Map<string, string> {
   return found
 }
 
+it('keeps shared-account command and output-marker guidance in the registered GitHub skill', async () => {
+  const skill = surfaces.find(surface => surface.where === 'skill dsh-superagent-github')!.text
+  expect(skill).toContain('still subject to the Source\'s Policy')
+  expect(skill).toContain('Do not start any generated GitHub output with that command.')
+  expect(skill).toContain('<!-- dsh-superagent:worker -->')
+  expect(skill).toContain('Quote command examples inside a fenced code block or a blockquote.')
+  await expect(skill).toMatchFileSnapshot('./expected/github-skill.md')
+})
+
 it('collects both roles\' tools, prompts, skills and inputs', () => {
   expect([...toolsOf('worker').keys()].sort()).toEqual(['orchestrator_ack', 'orchestrator_read', 'orchestrator_report',
     'orchestrator_thread_follow',

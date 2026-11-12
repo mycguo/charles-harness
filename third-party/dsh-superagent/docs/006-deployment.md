@@ -5,7 +5,7 @@ Use this guide to install, configure and operate dsh-superagent. It covers accou
 ## What runs
 
 - **A dedicated DeepSeek Harness profile**, called `superagent` in this guide. Create it from the Web profile template. It loads the bundle and serves its panel on `127.0.0.1`. Keep it separate from the profile you work in: the plugin changes process-wide `PATH` and git settings, and its process needs independent restarts and upgrades.
-- **An agent GitHub account.** The agent comments, pushes branches and opens pull requests as this account, through a GitHub CLI signed in only as that account.
+- **A GitHub account for agent actions.** The agent comments, pushes branches and opens pull requests as this account, through a GitHub CLI signed in only as that account. A dedicated account is recommended; an existing team account also works with Single-account mode below.
 - **Optional:** a Feishu bot for chat requests.
 
 Plugin configuration holds the state directory and machine limits. Use the panel for everything else: Sources for the repository and accounts, Policy for allowed lists, and Execution for worker directories and commands.
@@ -30,7 +30,7 @@ Both presets run with `danger-full-access` as the operator's OS user and read me
 
 ### Agent GitHub account
 
-1. Create a GitHub user account for the agent and give it write access to the repository. A GitHub App cannot be the agent, because dsh-superagent reads the account's notifications.
+1. Choose a GitHub user account with write access to the repository. A dedicated agent account is recommended. If only your existing team account is available, use Single-account mode below. A GitHub App cannot be the agent, because dsh-superagent reads the account's notifications.
 2. Give it a GitHub CLI that uses only its own credentials:
 
    ```sh
@@ -157,6 +157,20 @@ Setup must succeed before polling or work starts. Overview lists missing require
    List personal CLIs, such as one signed in to your own account, as blocked commands.
 4. **Prompts.** Set the team sections: the GitHub disclosure line, review bots, the commit author and the auto-merge condition.
 
+### Single-account team use
+
+When one account must serve both the operator and the agent, enable **Settings → Sources → GitHub → Single-account mode** (`allowSelfRequests: true`). Keep the repository as its real owner/name, such as `acme/widgets`, and select a CLI authenticated as your existing team account. Add that account, and any teammates who may request work, to **Policy → On each Source → GitHub → allowed accounts**. Repository ownership does not need to change.
+
+Post a new conversation comment on your own or a teammate's PR:
+
+```text
+/superagent review this PR and report actionable findings.
+```
+
+The command must start the first nonblank line, without indentation, and include instructions after a space. Use it again for follow-ups, for example `/superagent fix the failing test` or `/superagent stop`. Commands also work in new Issue/PR descriptions and in subscribed inline comments or reviews. This mode is off by default. Explicit commands from an allowed account work in `observe` mode too; that mode only defers inferred proactive work.
+
+The Source polls repository activity even with the receive-all switches off, because GitHub does not notify an account about its own requests. Discovery starts with new activity; post a new comment for an existing PR. Ordinary activity from the shared account and marked agent replies stay ignored. Host replies already have hidden `dsh-superagent` markers, and workers are instructed to mark direct GitHub writes and quote command examples. Keep those markers when editing automated output. Other teammates' mentions and policy behavior are unchanged. All automated actions appear as the shared account; GitHub's normal review and branch rules still apply.
+
 ### Management API
 
 The panel uses a local HTTP API that agents can also call. `SETUP.md` uses it to save settings, and the service script reads `GET state`.
@@ -200,7 +214,7 @@ A refusal has a status and `error`, its English text:
 
 The blocks:
 
-- `source:github`, `source:feishu`: `{"enabled": true, "config": {…}}`. GitHub's config has `repository` and `cli`, and the switches `observeIssues`, `observePulls`, `observeComments` and `observeCi`, off by default, which receive every new Issue, new pull request and comment in the repository and the default branch's CI; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`.
+- `source:github`, `source:feishu`: `{"enabled": true, "config": {…}}`. GitHub's config has `repository`, `cli`, `allowSelfRequests` for explicit `/superagent` commands from a shared account (false by default), and the switches `observeIssues`, `observePulls`, `observeComments` and `observeCi`, off by default, which receive every new Issue, new pull request and comment in the repository and the default branch's CI; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`.
 - `policy`: `{"rules": […], "sources": {"github": {"allowed": [{"id": "<login>"}], "bots": [{"id": "dependabot[bot]"}]}, "feishu": {"allowed": [{"id": "ou_…", "name": "…"}], "syncChat": "oc_…", "admission": {"oc_…": {"unlistedAddressed": "explicit"}}}}}`. `bots` lists the bots whose messages may become inferred candidates. An `admission` row is keyed by chat id, `other` or `direct` for Feishu, and by `issues`, `pulls`, `comments` or `ci` for GitHub; an unset cell takes its default (see [002 Authorization](002-authorization.md)).
 - `eval`: `mode`, `timeoutSeconds` and `model`.
 - `executor`: `model`, `maxWorkers`, `directory`, `prepare` and `blockedCommands`. The processing pause is a setting of its own, `paused`, which `POST executor/pause` sets.

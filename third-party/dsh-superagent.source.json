@@ -6,15 +6,55 @@
   "license": "MIT",
   "localModifications": [
     {
-      "path": "skills/dsh-superagent-github/SKILL.md",
-      "change": "Removed one trailing space to satisfy the repository commit checks."
+      "path": "SETUP.md",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
     },
     {
-      "path": "README.md",
-      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+      "path": "docs/002-authorization.md",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
     },
     {
       "path": "docs/006-deployment.md",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage. Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "skills/dsh-superagent-github/SKILL.md",
+      "change": "Removed one trailing space to satisfy the repository commit checks. Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+    },
+    {
+      "path": "src/sources/github-trigger.ts",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+    },
+    {
+      "path": "src/sources/github.ts",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+    },
+    {
+      "path": "tests/commands.spec.ts",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+    },
+    {
+      "path": "tests/model-surface.spec.ts",
+      "change": "Added a keyless snapshot of the registered GitHub worker skill and its shared-account output-marker guidance."
+    },
+    {
+      "path": "tests/panel-eval.spec.tsx",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+    },
+    {
+      "path": "tests/panel-source.spec.tsx",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+    },
+    {
+      "path": "tests/registry.spec.ts",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+    },
+    {
+      "path": "tests/sources.spec.ts",
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
+    },
+    {
+      "path": "README.md",
       "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
     },
     {
@@ -54,7 +94,16 @@
       "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
     }
   ],
+  "portedChanges": [
+    {
+      "repository": "https://github.com/mycguo/tebra-superagent",
+      "commit": "56179a6edbc14a7da3e247ed019568e492343c6c",
+      "feature": "Single-account mode",
+      "scope": "Explicit shared-account commands and output-loop prevention; mention aliases remain outside this port."
+    }
+  ],
   "localAdditions": [
+    "tests/expected/github-skill.md",
     "pnpm-workspace.yaml",
     "src/app/database.ts",
     "src/app/open-store.ts",

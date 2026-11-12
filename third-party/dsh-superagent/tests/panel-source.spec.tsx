@@ -93,6 +93,25 @@ it('renders each Source\'s settings from its kind\'s fields and saves one Source
   expect(server.revisions['source:github']).toBe(6)
 })
 
+it('saves single-account mode without changing the acting account or restarting workers', async () => {
+  await mount()
+  await click(tab(zh['tab.settings']))
+  const github = all('.dt-card')[1]!
+  expect(find('单账号模式').getAttribute('aria-checked')).toBe('false')
+  const revision = server.revisions['source:github']
+  await click('单账号模式')
+  expect(find('单账号模式').getAttribute('aria-checked')).toBe('true')
+  expect(server.settings.sources.github!.config.allowSelfRequests).toBeFalsy()
+  expect(server.revisions['source:github']).toBe(revision)
+  expect(github.textContent).not.toContain('保存会重启 dsh-superagent')
+  await act(async () => { github.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }); await settle()
+  expect(server.settings.sources.github!.config).toMatchObject({ allowSelfRequests: true })
+  expect(github.textContent).toContain('当前账号 @agent-bot')
+  await remount()
+  await click(tab(zh['tab.settings']))
+  expect(find('单账号模式').getAttribute('aria-checked')).toBe('true')
+})
+
 it('shows the account each CLI signs in as, and keeps a saved CLI on screen while dsh-superagent restarts', async () => {
   await mount()
   await click(tab(zh['tab.settings']))

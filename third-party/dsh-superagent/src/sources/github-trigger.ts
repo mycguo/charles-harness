@@ -59,16 +59,33 @@ function commentText(comment: GithubComment, kind: 'conversation' | 'inline' | '
 }
 export const mentions = (text: string, login: string): boolean =>
   new RegExp(`(?:^|[^a-zA-Z0-9_@])@${escapeRegExp(login)}(?![a-zA-Z0-9_-])`, 'i').test(text)
-const author = (user: { login: string; type?: string }, agent: string) =>
-  ({ actor: { source: SOURCE, id: user.login }, human: isHumanLogin(user) && !sameName(user.login, agent) })
+/**
+ * Recognizes an explicit command on the first nonblank line, excluding quoted examples and marked agent output.
+ * @param text - GitHub message body.
+ * @returns whether the body starts with an unmarked `/superagent` request.
+ */
+export const githubCommand = (text: string): boolean =>
+  !text.includes('<!-- dsh-superagent:') && /^(?:[ \t]*\r?\n)*\/superagent[ \t]+\S/.test(text)
+/**
+ * Accepts another account's input or an enabled, unmarked command from the shared human account.
+ * @param message - GitHub author and message body.
+ * @param agent - signed-in GitHub login.
+ * @param allowSelfRequests - whether explicit shared-account commands are enabled.
+ * @returns whether the source may ingest the message; Policy still decides authorization.
+ */
+export function githubInput(message: Pick<GithubComment, 'user' | 'body'>, agent: string, allowSelfRequests = false): boolean {
+  return !sameName(message.user.login, agent) || (allowSelfRequests && isHumanLogin(message.user) && githubCommand(message.body ?? ''))
+}
+const author = (message: Pick<GithubComment, 'user' | 'body'>, agent: string, allowSelfRequests: boolean) =>
+  ({ actor: { source: SOURCE, id: message.user.login }, human: isHumanLogin(message.user) && githubInput(message, agent, allowSelfRequests) })
 /** Builds a trigger for a comment or review; text is empty for a bodyless comment or a `COMMENTED` review without a body. */
-export function commentTrigger(comment: GithubComment, ref: PullRef, kind: 'conversation' | 'inline' | 'review', agent: string): Trigger {
+export function commentTrigger(comment: GithubComment, ref: PullRef, kind: 'conversation' | 'inline' | 'review', agent: string, allowSelfRequests = false): Trigger {
   const at = comment.updated_at ?? comment.submitted_at ?? comment.created_at ?? new Date().toISOString()
   const version = comment.updated_at ?? comment.submitted_at ?? ''
   const id = key('github-comment', comment.html_url ?? `github:${ref.number}`, String(comment.id), version)
-  return { id, source: SOURCE, threads: [{ source: SOURCE, id: String(ref.number) }], ...author(comment.user, agent), at,
+  return { id, source: SOURCE, threads: [{ source: SOURCE, id: String(ref.number) }], ...author(comment, agent, allowSelfRequests), at,
     text: commentText(comment, kind),
-    ...(mentions(comment.body ?? '', agent) ? { addressed: 'mention' as const } : {}),
+    ...(mentions(comment.body ?? '', agent) || (allowSelfRequests && githubCommand(comment.body ?? '')) ? { addressed: 'mention' as const } : {}),
     channel: githubChannel(ref.number, comment.html_url ?? undefined),
     ...(comment.html_url ?? ref.url ? { url: comment.html_url ?? ref.url } : {}),
     meta: { number: ref.number, isPr: ref.isPr, ...(ref.prAuthor ? { prAuthor: ref.prAuthor } : {}), commentId: comment.id, kind,
@@ -79,20 +96,20 @@ export function commentTrigger(comment: GithubComment, ref: PullRef, kind: 'conv
  * Builds the trigger for a newly opened Issue's title and body.
  * The ID is the same as when Issue bodies were stored previously, so already-stored bodies are not ingested again.
  */
-export function issueTrigger(issue: Opened, agent: string): Trigger {
+export function issueTrigger(issue: Opened, agent: string, allowSelfRequests = false): Trigger {
   const body = issue.body ?? ''
   return { id: key('github-issue', String(issue.number)), source: SOURCE,
-    threads: [{ source: SOURCE, id: String(issue.number) }], ...author(issue.user, agent), at: issue.created_at,
+    threads: [{ source: SOURCE, id: String(issue.number) }], ...author(issue, agent, allowSelfRequests), at: issue.created_at,
     text: `${issue.title}\n\n${body}`,
-    ...(mentions(body, agent) ? { addressed: 'mention' as const } : {}),
+    ...(mentions(body, agent) || (allowSelfRequests && githubCommand(body)) ? { addressed: 'mention' as const } : {}),
     channel: githubChannel(issue.number, issue.html_url), url: issue.html_url, meta: { number: issue.number, isPr: false, kind: 'issue' } }
 }
 /**
  * Builds the trigger for a newly opened PR's title and description.
  * PR and Issue numbers share one sequence in GitHub and never collide, so this reuses `issueTrigger`'s `github-issue` ID format.
  */
-export function pullTrigger(pull: Opened, agent: string): Trigger {
-  return { ...issueTrigger(pull, agent), meta: { number: pull.number, isPr: true, prAuthor: pull.user.login, kind: 'pull' } }
+export function pullTrigger(pull: Opened, agent: string, allowSelfRequests = false): Trigger {
+  return { ...issueTrigger(pull, agent, allowSelfRequests), meta: { number: pull.number, isPr: true, prAuthor: pull.user.login, kind: 'pull' } }
 }
 /** Builds a trigger for a default-branch CI transition; default-branch CI has no person to reply to, so it has no `channel`. */
 export function branchCiTrigger(branch: string, sha: string, revision: number, summary: string, url: string): Trigger {
