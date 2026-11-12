@@ -43,6 +43,7 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
       const instance = deps.sources.instance<C>(id)
       return instance?.enabled ? instance.config : undefined
     },
+    allowsSender: id => deps.sources.policyPart(kind.kind)?.allowed.some(sender => sender.id === id) ?? false,
     receive: trigger => deps.receive(trigger),
     atomic: work => store.atomic(work),
     state: {

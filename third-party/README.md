@@ -41,3 +41,7 @@ For the existing Tebra Google Cloud VM, follow [the Harness replacement guide](.
 ## Single-account mode
 
 Enable **Superagent → Settings → Sources → GitHub → Single-account mode** when the operator and agent share a GitHub account. Add that login to the GitHub Policy allowed list, then start each new request or follow-up with `/superagent` followed by instructions on the first nonblank line. The mode defaults to off; marked agent output stays excluded.
+
+## Jira
+
+Rebuild and reinstall the bundle before enabling its optional [Jira read tools](dsh-superagent/docs/013-jira-rest.md), [comment request Source](dsh-superagent/docs/014-jira-source.md), or [named MCP connections](dsh-superagent/docs/012-jira-mcp.md). Each Jira project maps to this deployment’s configured GitHub repository.

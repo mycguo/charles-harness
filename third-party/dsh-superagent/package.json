@@ -17,7 +17,9 @@
     "./github-watch": "./lib/github-watch.js",
     "./feishu-watch": "./lib/feishu-watch.js",
     "./package.json": "./package.json",
-    "./locale/*.json": "./locale/*.json"
+    "./locale/*.json": "./locale/*.json",
+    "./jira-kareo": "./lib/jira-kareo.js",
+    "./jira-watch": "./lib/jira-watch.js"
   },
   "files": [
     "lib",
@@ -25,7 +27,8 @@
     "locale/*.json",
     "README.md",
     "prompts",
-    "skills"
+    "skills",
+    "scripts/setup-jira-mcp.mjs"
   ],
   "dsh": {
     "bundle": {
@@ -58,6 +61,8 @@
   "dependencies": {
     "proper-lockfile": "4.1.2",
     "zod": "4.4.3",
+    "@modelcontextprotocol/client": "2.2.0",
+    "yaml": "2.9.1",
     "pg": "8.23.1",
     "synckit": "0.12.3"
   },
@@ -123,6 +128,7 @@
     "react-dom": "18.3.1",
     "@types/react-dom": "18.3.7",
     "@deepseek-ai/dsh-subprocess": "0.2.1-alpha.2",
+    "@deepseek-ai/cordis-plugin-loader": "1.0.6-alpha.1",
     "@types/pg": "8.23.1",
     "embedded-postgres": "18.6.0-beta.19"
   }

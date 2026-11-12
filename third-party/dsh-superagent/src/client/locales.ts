@@ -608,6 +608,7 @@ const TEXT = {
   'reason.humanStop': ['有人要求停止', 'Someone asked to stop'],
   'reason.forwarded': ['已扇出给该线程的工单', 'Fanned out to the Thread\'s Ticket'],
   'reason.senderNotMember': ['发送者不在这个来源的名单里', 'Sender is not on this Source\'s list'],
+  'reason.jira_project_not_allowed': ['Jira 项目或仓库不在接收范围', 'Jira site, project or repository is no longer received'],
   'reason.source_disabled': ['来源已停用', 'Source disabled'],
   'reason.issue_sender_or_admission_disabled': ['Issue 发起人不在名单或主动接单已关闭', 'Issue sender not on the list, or proactive accept off'],
   'reason.source_not_installed': ['来源插件未加载', 'Source plugin not loaded'],

@@ -39,3 +39,7 @@ Read the numbered documents in order; each builds only on the ones before it.
 ## License
 
 [MIT](LICENSE)
+
+## Jira
+
+Optional [Jira REST read tools](docs/013-jira-rest.md) expose issue search, details, comments and history. [Jira command intake](docs/014-jira-source.md) turns authorized `/superagent` comments into tickets and replies on the originating issue. [Named Jira MCP connections](docs/012-jira-mcp.md) support separate personal/work accounts in ordinary chats. All integrations are opt-in; tokens remain in the host environment.

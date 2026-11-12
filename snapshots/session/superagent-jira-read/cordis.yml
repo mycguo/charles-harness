@@ -1,0 +1,10 @@
+- insert:
+    - id: jira-http-fixture
+      name: './jira-http-fixture.mjs'
+    - id: jira-kareo
+      name: '../../../third-party/dsh-superagent/src/jira-kareo.ts'
+      config:
+        site: https://example.atlassian.net
+        cloudId: 12345678-1234-4234-8234-123456789abc
+        emailEnv: JIRA_SNAPSHOT_EMAIL
+        tokenEnv: JIRA_SNAPSHOT_TOKEN

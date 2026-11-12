@@ -52,14 +52,44 @@ declare module '@deepseek-ai/cordis' {
     'agent-preset/selected'(sessionId: string, agentPreset: string): void
   }
 }
+const JIRA_READ_TOOLS = ['jira_kareo_search', 'jira_kareo_get_issue', 'jira_kareo_comments', 'jira_kareo_history']
+/** Follow inherited registrations, including optional plugins loaded after a Session was decorated. */
+function restrictInheritedTools(agent: Agent, names: string[]): () => void {
+  let signature: string | undefined, restriction: (() => void) | undefined
+  let active = true, refreshing = false, again = false
+  const refresh = () => {
+    if (!active) return
+    if (refreshing) { again = true; return }
+    refreshing = true
+    try {
+      do {
+        again = false
+        // Restrict accepts only known inherited names; the agent's own allowlist must not mask this lookup.
+        const parent = scopeParentOf(agent)
+        const allow = names.filter(name => agent.ctx.tools.get(name, parent))
+        const next = JSON.stringify(allow)
+        if (next === signature) continue
+        // Both registering and disposing restrictions emit tools/change. Publish before either operation.
+        signature = next
+        const previous = restriction
+        restriction = agent.ctx.tools.restrict({ allow })
+        previous?.()
+      } while (again)
+    } finally { refreshing = false }
+  }
+  const unlisten = agent.ctx.on('tools/change', refresh)
+  const dispose = () => { active = false; unlisten(); restriction?.(); restriction = undefined }
+  try { refresh() } catch (error) { dispose(); throw error }
+  return dispose
+}
 /**
  * The DSH tools an Executor Session works with: files, search, the shell and its jobs, the web, skills, its todo list and
- * subagents. It gets no other tool the profile has, whenever it was registered: none that asks or shows a person something,
+ * subagents, and optional Jira read tools. It gets no other tool the profile has, whenever it was registered: none that asks or shows a person something,
  * changes the profile, schedules work or starts goals outside the worker slots, the pause and a person's hold, starts or
  * messages other Sessions, or edits documents.
  */
 const WORK_TOOLS = ['read', 'write', 'edit', 'read_image', 'glob', 'grep', 'bash', 'pwsh', 'job_output', 'job_list', 'job_kill', 'web_search',
-  'web_fetch', 'skill', 'todo_write', 'subagent', 'list_subagent_models', 'send_message', 'list_agents', 'interrupt_agent']
+  'web_fetch', 'skill', 'todo_write', 'subagent', 'list_subagent_models', 'send_message', 'list_agents', 'interrupt_agent', ...JIRA_READ_TOOLS]
 /** What the main Session is told when it would wait: what it waits for comes to it, and a waiting step holds back the next. */
 const NO_WAIT = 'Reports, follow_up notices, new candidates and a background job\'s end with its output arrive by themselves as messages; '
   + 'end the turn instead of waiting for them.'
@@ -205,7 +235,7 @@ export class Sessions {
   /** Returns a tool registrar for `agent` that renders tool output as JSON text and attaches `output.image` as an image when present. */
   private registerTool(agent: Agent, binding: SessionBinding): RegisterTool {
     return (name, description, schema, execute) => {
-      binding.disposers.push(agent.ctx.tools.register({ name, description, parameters: z.toJSONSchema(schema),
+      binding.disposers.push(agent.ctx.tools.register({ name, description, parameters: JSON.parse(JSON.stringify(z.toJSONSchema(schema))),
         output: { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => {
           const text = { type: 'text' as const, text: JSON.stringify(value) }
           const image = value && typeof value === 'object' && 'image' in value ? (value as { image: never }).image : undefined
@@ -260,7 +290,7 @@ export class Sessions {
     const register = this.registerTool(agent, binding)
     for (const tool of host.tools(agent, ticket)) register(tool.name, tool.description, tool.schema, tool.execute)
     if (master) {
-      binding.disposers.push(agent.ctx.tools.restrict({ allow: ['skill', 'bash', 'read', 'read_image', 'job_output', 'job_list', 'job_kill'] }),
+      binding.disposers.push(restrictInheritedTools(agent, ['skill', 'bash', 'read', 'read_image', 'job_output', 'job_list', 'job_kill', ...JIRA_READ_TOOLS]),
         agent.ctx.tools.guard(execution => noWait(execution, () => this.routed(agent))))
     } else {
       // An Executor Session keeps the profile's work tools it has, which DSH requires to be known; its own tools are not masked.
@@ -288,9 +318,7 @@ export class Sessions {
    */
   private workOnly(agent: Agent, ticketId: string): (() => void)[] {
     const store = this.host.store
-    const parent = scopeParentOf(agent)
-    const allow = WORK_TOOLS.filter(name => agent.ctx.tools.get(name, parent))
-    return [agent.ctx.tools.restrict({ allow }), agent.ctx.tools.guard(() => {
+    return [restrictInheritedTools(agent, WORK_TOOLS), agent.ctx.tools.guard(() => {
       const current = store.tickets.get(ticketId)
       return !current || !liveTicket(current) ? 'Ticket ended; new work needs a new authorized ticket' : undefined
     })]
