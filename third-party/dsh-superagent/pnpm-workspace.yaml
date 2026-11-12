@@ -1,0 +1,2 @@
+allowBuilds:
+  '@embedded-postgres/*': true

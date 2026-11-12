@@ -6,16 +6,8 @@
   "license": "MIT",
   "localModifications": [
     {
-      "path": "README.md",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
       "path": "SETUP.md",
       "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage. Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "cordis.patch.yml",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
     },
     {
       "path": "docs/002-authorization.md",
@@ -23,43 +15,11 @@
     },
     {
       "path": "docs/006-deployment.md",
-      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
-    },
-    {
-      "path": "package.json",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "pnpm-lock.yaml",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "prompts/replies.md",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "prompts/work.md",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
+      "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage. Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
     },
     {
       "path": "skills/dsh-superagent-github/SKILL.md",
       "change": "Removed one trailing space to satisfy the repository commit checks. Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
-    },
-    {
-      "path": "src/app/sessions.ts",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "src/app/source-context.ts",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "src/client/locales.ts",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "src/infra/commands.ts",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
     },
     {
       "path": "src/sources/github-trigger.ts",
@@ -68,22 +28,6 @@
     {
       "path": "src/sources/github.ts",
       "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
-    },
-    {
-      "path": "src/sources/host.ts",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "src/sources/kind.ts",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "src/sources/registry.ts",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
-      "path": "tests/bundle-patch.spec.ts",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
     },
     {
       "path": "tests/commands.spec.ts",
@@ -106,15 +50,95 @@
       "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
     },
     {
-      "path": "tests/runtime.spec.ts",
-      "change": "Added optional Jira integration support or its setup and regression coverage."
-    },
-    {
       "path": "tests/sources.spec.ts",
       "change": "Ported opt-in Single-account mode, its command filtering, instructions, or regression coverage."
     },
     {
+      "path": "README.md",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage. Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "docs/007-architecture.md",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "package.json",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage. Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage. Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "src/app/runtime.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "src/app/store-read.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "src/app/store.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "src/deployment.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
+      "path": "tests/deployment.spec.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage."
+    },
+    {
       "path": "tsdown.config.ts",
+      "change": "Added optional PostgreSQL storage, environment-owned credentials, atomic SQLite import, or its documentation and regression coverage. Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "cordis.patch.yml",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "prompts/replies.md",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "prompts/work.md",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "src/app/sessions.ts",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "src/app/source-context.ts",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "src/client/locales.ts",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "src/infra/commands.ts",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "src/sources/host.ts",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "src/sources/kind.ts",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "src/sources/registry.ts",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "tests/bundle-patch.spec.ts",
+      "change": "Added optional Jira integration support or its setup and regression coverage."
+    },
+    {
+      "path": "tests/runtime.spec.ts",
       "change": "Added optional Jira integration support or its setup and regression coverage."
     }
   ],
@@ -133,6 +157,13 @@
     }
   ],
   "localAdditions": [
+    "tests/expected/github-skill.md",
+    "pnpm-workspace.yaml",
+    "src/app/database.ts",
+    "src/app/open-store.ts",
+    "src/app/postgres-worker.ts",
+    "src/app/postgres.ts",
+    "tests/postgres.spec.ts",
     "docs/012-jira-mcp.md",
     "docs/013-jira-rest.md",
     "docs/014-jira-source.md",
@@ -143,7 +174,6 @@
     "src/sources/jira-api.ts",
     "src/sources/jira-trigger.ts",
     "src/sources/jira.ts",
-    "tests/expected/github-skill.md",
     "tests/expected/jira-prompts.json",
     "tests/expected/jira-tools.json",
     "tests/fixtures/jira/cordis.yml",
