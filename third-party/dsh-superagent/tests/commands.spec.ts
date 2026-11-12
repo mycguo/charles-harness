@@ -4,7 +4,7 @@ import { CliError, Commands, commandError } from '../src/infra/commands.ts'
 import { feishuKind } from '../src/sources/feishu.ts'
 import { feishuChannel } from '../src/sources/feishu-trigger.ts'
 import { githubKind } from '../src/sources/github.ts'
-import { githubChannel } from '../src/sources/github-trigger.ts'
+import { githubChannel, githubInput } from '../src/sources/github-trigger.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 import { SettingsSchema } from '../src/policy.ts'
 import { key, type OutboundMessage } from '../src/core/index.ts'
@@ -46,6 +46,15 @@ describe('account-isolated operations', () => {
     expect(gh).toHaveBeenCalledWith(['api',`repos/${REPOSITORY}/issues/8/comments`,'--method','POST','-f',expect.stringMatching(/^body=Done\n\n<!-- dsh-superagent:stable-operation -->$/)])
     await expect(new Commands(() => deployment, {}, new AbortController().signal).pages(z.unknown(),
       '../../someone/else/issues')).rejects.toThrow()
+  })
+  it('never ingests a host reply as a shared-account command even when it repeats the request', async () => {
+    const commands = new Commands(() => deployment, {}, new AbortController().signal)
+    vi.spyOn(commands, 'pages').mockResolvedValue([])
+    const gh = vi.spyOn(commands, 'gh').mockResolvedValue({})
+    await send(commands, { ...reply, text: '/superagent review this PR' })
+    const body = gh.mock.calls[0]![0].find(arg => arg.startsWith('body='))!.slice('body='.length)
+    expect(body).toContain('<!-- dsh-superagent:stable-operation -->')
+    expect(githubInput({ body, user: { login: deployment.github.login } }, deployment.github.login, true)).toBe(false)
   })
   it('routes review-comment replies to the root review comment', async () => {
     const commands = new Commands(() => deployment, {}, new AbortController().signal); vi.spyOn(commands,'pages').mockResolvedValue([])
