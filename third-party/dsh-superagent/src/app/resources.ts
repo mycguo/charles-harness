@@ -3,6 +3,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { UserError, key, latestReport, reached, runningAssignment, threadKey, type Ticket, type Trigger } from '../core/index.ts'
 import { batchOf, inputMessage, triggerMessage, workerSessionId } from '../executor/dsh.ts'
 import { readGithub } from '../sources/github-read.ts'
+import { triggerRepository } from '../sources/github-repository.ts'
 import { feishuReferences, feishuRead } from '../sources/feishu-read.ts'
 import { feishuRef } from '../sources/feishu.ts'
 import { feishuTriggerId } from '../sources/feishu-trigger.ts'
@@ -206,7 +207,15 @@ const ROUTES: readonly Route[] = [
     const commands = read.host.commands.withSignal(read.signal)
     return sourcePage(read, 'feishu', () => feishuRead(commands, ref, read.resource, read.host.feishuPageSize()))
   }],
-  ['github/', read => sourcePage(read, 'github', () => readGithub(read.host.commands.withSignal(read.signal), read.resource))],
+  ['github/', read => {
+    let commands = read.host.commands
+    const explicit = /^github\/repos\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(.+)$/.exec(read.resource)
+    const ticket = read.ticketId ? read.host.store.tickets.get(read.ticketId) : undefined
+    const repository = ticket ? triggerRepository(commands.deployment, read.host.store.triggers.get(ticket.origin.triggerId)) : commands.repository
+    if (explicit && ticket && explicit[1]!.toLowerCase() !== repository.toLowerCase()) throw new Error('GitHub resource belongs to another repository')
+    commands = commands.forRepository(explicit?.[1] ?? repository).withSignal(read.signal)
+    return sourcePage(read, 'github', () => readGithub(commands, read.resource))
+  }],
   ['trigger/', async read => {
     const { host, rest, ticketId, offset, signal } = read
     if (!rest || rest.includes('/')) throw new Error('Unknown context resource')

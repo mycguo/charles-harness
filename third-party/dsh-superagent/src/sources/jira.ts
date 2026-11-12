@@ -62,7 +62,7 @@ export const jiraKind: SourceKind<JiraConfig> = {
     { key: 'email', type: 'text', label: { zh: '令牌所有者邮箱', en: 'Token owner email' } },
     { key: 'tokenEnv', type: 'text', label: { zh: '令牌环境变量名称', en: 'Token environment variable name' }, hint: { zh: '只填写变量名称，不填写令牌。', en: 'Enter the variable name, such as JIRA_SUPERAGENT_TOKEN. Store its secret value in the host environment, never here.' } },
     { key: 'projects', type: 'rows', label: { zh: '项目与仓库', en: 'Projects and repositories' },
-      hint: { zh: '每个项目必须映射到此部署已配置的 GitHub 仓库。', en: 'Map each project to this deployment’s configured GitHub repository. Only new or edited command comments after activation are read.' },
+      hint: { zh: '每个项目必须映射到正在监听的 GitHub 仓库。', en: 'Map each project to a watched GitHub repository. Only new or edited command comments after activation are read.' },
       columns: [{ key: 'project', type: 'text', label: { zh: '项目键', en: 'Project key' }, pattern: '[A-Z][A-Z0-9_]*' },
         { key: 'repository', type: 'text', label: { zh: '仓库 owner/repo', en: 'Repository owner/repo' }, pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' }] },
     { key: 'pollSeconds', type: 'number', advanced: true, min: 60, max: 3600, label: { zh: '轮询间隔 / 秒', en: 'Polling interval / seconds' } },

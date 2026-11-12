@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
-import type { Deployment } from '../deployment.ts'
+import { deploymentRepositories, type Deployment } from '../deployment.ts'
 
 const exec = promisify(execFile)
 const TIMEOUT_MS = 90_000
@@ -64,10 +64,11 @@ export class Commands {
   constructor(private readonly resolved: () => Deployment, private readonly environment: Record<string, string | undefined>, readonly signal: AbortSignal) {}
   get deployment(): Deployment { return this.resolved() }
   get repository(): string { return this.deployment.repository }
-  /** Rejects Jira mappings outside this deployment's configured GitHub repository. */
+  /** Select one explicitly configured repository; never accept a URL or an arbitrary API prefix. */
   forRepository(repository: string): Commands {
-    if (repository.toLowerCase() !== this.repository.toLowerCase()) throw new Error('Repository is not configured for this deployment')
-    return this
+    const canonical = deploymentRepositories(this.deployment).find(name => name.toLowerCase() === repository.toLowerCase())
+    if (!canonical) throw new Error(`Repository is not watched: ${repository}`)
+    return canonical === this.repository ? this : new Commands(() => ({ ...this.deployment, repository: canonical }), this.environment, this.signal)
   }
   withSignal(signal?: AbortSignal): Commands { return signal ? new Commands(this.resolved, this.environment, AbortSignal.any([this.signal, signal])) : this }
   async run(program: string, args: string[], cwd?: string): Promise<string> {

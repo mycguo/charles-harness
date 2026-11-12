@@ -1,7 +1,7 @@
 /** Probes repository and account CLIs, configures the worker execution environment and command shims, and tracks setup readiness. */
 import type { Context } from '@deepseek-ai/cordis'
 import { UserError } from '../core/index.ts'
-import { SETUP_FIELDS, resolveDeployment, resolveFeishuBot, workerProbe, type Deployment, type Machine } from '../deployment.ts'
+import { GithubAccountsSchema, SETUP_FIELDS, resolveDeployment, resolveFeishuBot, workerProbe, type Deployment, type Machine } from '../deployment.ts'
 import { agentVariables, applyEnvironment, verifyEnvironment, withoutDirectory, workerBin, writeEnvironment } from '../infra/environment.ts'
 import type { Settings, SettingsBlock } from '../policy.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
@@ -11,10 +11,15 @@ export interface SetupHost {
   readonly machine: Machine
   readonly lifetime: AbortSignal
   restart(): void
+  rememberRepository?(repository: string): string
 }
 
-const setupFields = (settings: Settings) =>
-  JSON.stringify(Object.entries(SETUP_FIELDS).map(([id, keys]) => keys.map(key => settings.sources[id]?.config[key] ?? '')))
+const setupFields = (settings: Settings) => {
+  const github = GithubAccountsSchema.parse(settings.sources.github?.config ?? {})
+  const normalized = { ...github, repositories: github.repositories ?? (github.repository ? [{ id: github.repository, status: 'watch' }] : []) }
+  return JSON.stringify(Object.entries(SETUP_FIELDS).map(([id, keys]) => keys.map(key =>
+    (id === 'github' ? normalized as Record<string, unknown> : settings.sources[id]?.config)?.[key] ?? '')))
+}
 export const setupChanged = (before: Settings, after: Settings): boolean => setupFields(before) !== setupFields(after)
 
 /**
@@ -83,7 +88,8 @@ export class Setup {
       context.logger.warn('dsh-superagent leaves Feishu out: %s', error.message)
       return undefined
     })
-    const resolved = { ...deployment, ...(feishu ? { feishu } : {}) }
+    const resolved = { ...deployment, legacyRepository: this.host.rememberRepository?.(deployment.repository) ?? deployment.repository,
+      ...(feishu ? { feishu } : {}) }
     const machineProblem = (error: unknown): never => {
       if (error instanceof SetupError) throw error
       throw new SetupError('environmentFailed', { output: error instanceof Error ? error.message : String(error) })

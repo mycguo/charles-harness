@@ -145,7 +145,7 @@ Check dsh-superagent: run `scripts/dsh-superagent --profile superagent status` i
 
 Setup must succeed before polling or work starts. Overview lists missing requirements and links to their settings. A settings change runs setup again. If you fix something outside the application, such as CLI authentication, choose **Check again**.
 
-1. **Sources.** Set the GitHub repository (`owner/name`) and agent CLI, for example `/home/me/.local/bin/gh-agent`. Requests normally arrive through the agent account's notifications. A new Issue or comment mentioning the account arrives on the next poll; adding a mention by editing an existing Issue body does not. Post a new comment instead. For Feishu, set the bot CLI, chats, each chat's receive-all or mentions-only mode, and whether to receive direct messages.
+1. **Sources.** Add the GitHub repositories (`owner/name`) and set the agent CLI, for example `/home/me/.local/bin/gh-agent`. Requests normally arrive through the agent account's notifications. A new Issue or comment mentioning the account arrives on the next poll; adding a mention by editing an existing Issue body does not. Post a new comment instead. For Feishu, set the bot CLI, chats, each chat's receive-all or mentions-only mode, and whether to receive direct messages.
 2. **Policy.** The two example rules can be edited or removed. Under **On each Source**, add the GitHub accounts and Feishu users who may ask for work; until a list has someone, no request can become a Ticket. With Feishu, a chat can be chosen to sync the list from, at startup and on **Sync now**.
 3. **Execution.** The directory root and a prepare command. To give each Ticket a checkout of the repository:
 
@@ -156,6 +156,22 @@ Setup must succeed before polling or work starts. Overview lists missing require
 
    List personal CLIs, such as one signed in to your own account, as blocked commands.
 4. **Prompts.** Set the team sections: the GitHub disclosure line, review bots, the commit author and the auto-merge condition.
+
+### Multiple repositories
+
+On **Sources → GitHub**, choose **Add repository**, enter `owner/repo`, and choose Watching or Paused for each row. Saving verifies push access through the configured GitHub CLI and restarts the runtime. One unreadable repository rejects the save; polling failures after setup are reported while other repositories continue polling. Paused repositories do not receive new work or send queued replies. The first watching row is the default for requests without an explicit repository; Jira requests use their project mapping.
+
+Existing single-repository settings open as one Watching row. The original repository's numeric thread identities, polling cursors, and open tickets are preserved. Other repositories carry their name in thread and trigger identities, so equal issue or PR numbers remain separate after rows are reordered. Removing or pausing a repository does not delete its history; pending work cannot use that repository until it is watching again.
+
+A prepare command tied to one local clone must be replaced before jobs target another repository. For a POSIX host with Python 3, set **Execution → Prepare command** to the absolute path of the installed `scripts/prepare-github-ticket`, for example:
+
+```sh
+python3 "$HOME/.dsh_charles/profiles/superagent/node_modules/dsh-superagent/scripts/prepare-github-ticket"
+```
+
+The helper uses `DSH_SUPERAGENT_GITHUB_REPOSITORY` to choose a locked bare cache under `DSH_SUPERAGENT_REPOSITORY_CACHE`, then creates the ticket's detached checkout at `DSH_SUPERAGENT_DIR`. It supports concurrent tickets and PR head refs and rejects reusing a checkout from another repository. Existing prepare commands remain configurable and are not overwritten automatically. Workers create their own branch in the prepared checkout.
+
+Map each Jira project to a Watching repository in **Sources → Jira** and add authorized Atlassian account IDs under Jira Policy. New mappings begin at activation; post or edit command comments after Ready.
 
 ### Single-account team use
 
@@ -214,7 +230,7 @@ A refusal has a status and `error`, its English text:
 
 The blocks:
 
-- `source:github`, `source:feishu`: `{"enabled": true, "config": {…}}`. GitHub's config has `repository`, `cli`, `allowSelfRequests` for explicit `/superagent` commands from a shared account (false by default), and the switches `observeIssues`, `observePulls`, `observeComments` and `observeCi`, off by default, which receive every new Issue, new pull request and comment in the repository and the default branch's CI; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`.
+- `source:github`, `source:feishu`: `{"enabled": true, "config": {…}}`. GitHub's config has `repositories` as `[{"id": "acme/widgets", "status": "watch"}]` (or `"paused"`), the legacy `repository`, `cli`, `allowSelfRequests` for explicit `/superagent` commands from a shared account (false by default), and the switches `observeIssues`, `observePulls`, `observeComments` and `observeCi`, off by default, which receive every new Issue, new pull request and comment in the repository and the default branch's CI; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`.
 - `policy`: `{"rules": […], "sources": {"github": {"allowed": [{"id": "<login>"}], "bots": [{"id": "dependabot[bot]"}]}, "feishu": {"allowed": [{"id": "ou_…", "name": "…"}], "syncChat": "oc_…", "admission": {"oc_…": {"unlistedAddressed": "explicit"}}}}}`. `bots` lists the bots whose messages may become inferred candidates. An `admission` row is keyed by chat id, `other` or `direct` for Feishu, and by `issues`, `pulls`, `comments` or `ci` for GitHub; an unset cell takes its default (see [002 Authorization](002-authorization.md)).
 - `eval`: `mode`, `timeoutSeconds` and `model`.
 - `executor`: `model`, `maxWorkers`, `directory`, `prepare` and `blockedCommands`. The processing pause is a setting of its own, `paused`, which `POST executor/pause` sets.

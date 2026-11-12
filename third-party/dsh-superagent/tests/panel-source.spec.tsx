@@ -112,21 +112,42 @@ it('saves single-account mode without changing the acting account or restarting 
   expect(find('单账号模式').getAttribute('aria-checked')).toBe('true')
 })
 
+it('adds an arbitrary repository beside the existing one and saves its per-repository pause setting', async () => {
+  await mount()
+  await click(tab(zh['tab.settings']))
+  const github = all('.dt-card')[1]!
+  expect(github.querySelector('.dt-row-label')?.textContent).toBe('acme/widgets')
+  await click('添加仓库')
+  const repository = github.querySelector<HTMLInputElement>('input[aria-label="owner/repo"]')!
+  await type(repository, 'another-owner/new-project')
+  const statuses = github.querySelectorAll<HTMLSelectElement>('select[aria-label="状态"]')
+  expect(statuses[0]!.value).toBe('watch')
+  await type(statuses[1]!, 'paused')
+  await act(async () => { github.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }); await settle()
+  expect(server.settings.sources.github!.config.repositories).toEqual([
+    { id: 'acme/widgets', status: 'watch' }, { id: 'another-owner/new-project', status: 'paused' },
+  ])
+  await remount()
+  await click(tab(zh['tab.settings']))
+  expect(text()).toContain('another-owner/new-project')
+  expect(all('.dt-card')[1]!.querySelectorAll<HTMLSelectElement>('select[aria-label="状态"]')[1]!.value).toBe('paused')
+})
+
 it('shows the account each CLI signs in as, and keeps a saved CLI on screen while dsh-superagent restarts', async () => {
   await mount()
   await click(tab(zh['tab.settings']))
   const github = all('.dt-card')[1]!
   expect(github.textContent).toContain('当前账号 @agent-bot')
   const labels = () => [...github.querySelectorAll('label')].map(label => label.textContent)
-  expect(labels()).toEqual(['监听的仓库', '智能体的 GitHub CLI'])
-  expect(field<HTMLInputElement>('监听的仓库').value).toBe('acme/widgets')
+  expect(labels()).toEqual(['智能体的 GitHub CLI'])
+  expect(github.querySelector('.dt-row-label')?.textContent).toBe('acme/widgets')
   // A fact describes the saved value, so an edited CLI shows none until it is saved.
   await type(field<HTMLInputElement>('智能体的 GitHub CLI'), 'gh-other')
   expect(github.textContent).not.toContain('当前账号 @agent-bot')
   await click(zh.discard)
   expect(github.textContent).toContain('当前账号 @agent-bot')
   await click([...github.querySelectorAll<HTMLElement>('[data-disclosure-row]')].find(row => row.textContent?.includes('高级'))!)
-  expect(labels()).toEqual(['监听的仓库', '智能体的 GitHub CLI', '轮询间隔 / 秒', '连续失败几次后报告异常'])
+  expect(labels()).toEqual(['智能体的 GitHub CLI', '轮询间隔 / 秒', '连续失败几次后报告异常'])
   expect(all('.dt-card')[0]!.textContent).toContain('当前机器人 Widgets Bot')
   await type(field<HTMLInputElement>('智能体的 GitHub CLI'), '/opt/bin/gh-agent')
   expect(github.textContent).toContain('保存会重启 dsh-superagent：2 个进行中的派工会中断，并带恢复说明重新开始。')

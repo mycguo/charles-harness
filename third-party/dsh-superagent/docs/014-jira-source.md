@@ -15,7 +15,7 @@ The optional Jira Source turns a new Jira comment such as `/superagent fix this 
 
 3. From the Harness repository root, stop the existing process and restart with `DSH_HOME="$HOME/.dsh_charles" pnpm dsh --profile superagent --host 127.0.0.1 --port 3081`. Under **Settings → Sources → Jira**, enter the site origin (`https://example.atlassian.net`), token owner's email, and the **environment variable name**, never the token value. For a scoped REST token, also enter the site's Cloud ID: requests then use `https://api.atlassian.com/ex/jira/<cloudId>`. Leave Cloud ID empty for an unscoped token using the site endpoint. See [Atlassian's scoped-token endpoint guidance](https://support.atlassian.com/atlassian-cloud/kb/401-unauthorized-error-when-service-account-accesses-jira-or-confluence-api/).
 
-4. Add project/repository rows, for example `DEMO` → `acme/widgets`. Every mapping must name the GitHub repository configured in this deployment, using its configured GitHub CLI account with push access. Each Jira project maps to exactly one repository. Enable the Jira Source and save.
+4. Add project/repository rows, for example `DEMO` → `acme/widgets`. Every mapping must name a Watching GitHub repository in this deployment, using the configured GitHub CLI account with push access. Each Jira project maps to exactly one repository. Enable the Jira Source and save.
 
 5. Under **Settings → Eval → Policy**, add the requesting user's **Atlassian accountId** to **Jira users who may originate work**, then save. This is independent of GitHub usernames and the token owner's email. Account IDs are returned by Jira's user APIs, including `GET /rest/api/3/myself` for your own account. Do not put an email or display name in the ID field.
 
@@ -44,4 +44,4 @@ For no Trigger, check Source Ready, activation time, project mapping, the first-
 
 The deployment operator must verify live Jira access with the intended credentials. Automated tests use offline Jira responses and a local MCP server; they do not establish access to an organization’s Jira site.
 
-This imported bundle supports one configured GitHub repository per deployment. Every Jira project mapping must name that repository; another target is rejected before Jira polling. Project moves still create a distinct thread identity.
+Every Jira project mapping selects a Watching GitHub repository. An unwatched or paused target is rejected before Jira polling. Project moves still create a distinct thread identity.

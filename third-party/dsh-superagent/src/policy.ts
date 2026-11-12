@@ -114,7 +114,12 @@ export const POLICY_REVISION = 'mandate-v3'
  * Changes to models, concurrency, pause state, or polling intervals do not invalidate existing decisions.
  */
 export function policyVersion(settings: Settings): string {
-  return key(POLICY_REVISION, JSON.stringify({ rules: settings.policy.rules, mode: settings.eval.mode, sources: settings.policy.sources }))
+  const github = settings.sources.github
+  const rows = github?.config.repositories
+  const repositories = (Array.isArray(rows) ? rows.filter(row => row.status !== 'paused').map(row => String(row.id))
+    : github?.config.repository ? [String(github.config.repository)] : []).map(name => name.toLowerCase()).sort()
+  return key(POLICY_REVISION, JSON.stringify({ rules: settings.policy.rules, mode: settings.eval.mode, sources: settings.policy.sources,
+    ...repositories.length ? { githubReceiving: { enabled: github?.enabled ?? true, repositories } } : {} }))
 }
 export function allowedSender(settings: Settings, actor: ActorRef): z.infer<typeof AllowedSchema> | undefined {
   return settings.policy.sources[actor.source]?.allowed.find(entry => sameName(entry.id, actor.id))

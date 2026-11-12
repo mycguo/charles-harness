@@ -54,16 +54,33 @@ export function machineOf(config: DeploymentConfig): Machine {
     databaseUrl: config.databaseUrl, databasePasswordEnv: config.databasePasswordEnv, databaseSchema: config.databaseSchema, databaseImportSqlite: config.databaseImportSqlite, databaseTimeoutMs: config.databaseTimeoutMs }
 }
 
+export const GithubRepositorySchema = z.object({
+  id: z.string().trim().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'owner/name'),
+  status: z.enum(['watch', 'paused']).default('watch'),
+}).strict()
 export const GithubAccountsSchema = z.object({
+  // Kept for profiles saved before repository lists and as the identity of their legacy threads.
   repository: z.string().trim().regex(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?$/, 'owner/name').default(''),
+  repositories: z.array(GithubRepositorySchema).refine(rows => new Set(rows.map(row => row.id.toLowerCase())).size === rows.length,
+    'Each repository may be listed only once').optional(),
   cli: z.string().trim().default(''),
 })
+export function githubRepositories(accounts: Pick<z.infer<typeof GithubAccountsSchema>, 'repository' | 'repositories'>): string[] {
+  return accounts.repositories ? accounts.repositories.filter(row => row.status === 'watch').map(row => row.id)
+    : accounts.repository ? [accounts.repository] : []
+}
+export const deploymentRepositories = (deployment: Pick<Deployment, 'repository' | 'repositories'>): string[] =>
+  deployment.repositories ?? [deployment.repository]
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
 /** Source configuration keys that affect deployment setup and trigger a restart when changed. */
 export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape) }
 
 export interface Deployment extends Machine {
   repository: string
+  repositories?: string[]
+  repositoryAliases?: Record<string, string>
+  /** The first repository's old numeric thread keys remain attached to it even after removing or reordering rows. */
+  legacyRepository?: string
   github: { cli: string; login: string; noreply: string }
   feishu?: FeishuBot
 }
@@ -99,8 +116,8 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
 export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
   const { stateDir } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
-  const remote = accounts.repository
-  if (!remote) throw new SetupError('repositoryUnset')
+  const remotes = githubRepositories(accounts)
+  if (!remotes.length) throw new SetupError('repositoryUnset')
   if (!accounts.cli) throw new SetupError('agentCliUnset')
   let cli: string
   try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
@@ -108,13 +125,19 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
   const agent = parsed(GithubUser, text)
   if (!agent) throw new SetupError('agentCliNoAccount')
   // Use the canonical repository name returned by GitHub so renamed repositories match incoming notifications.
-  const access = parsed(RepositoryAccess, await probe([cli, 'api', `repos/${remote}`, '--jq', '{name: .full_name, push: .permissions.push}']).catch((error: unknown) => {
-    throw new SetupError('repositoryUnreadable', { account: agent.login, repository: remote, output: reason(error) })
-  }))
-  if (!access) throw new SetupError('repositoryUnreported', { repository: remote })
-  const repository = access.name
-  if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
-  return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
+  const repositories: string[] = []
+  const repositoryAliases: Record<string, string> = {}
+  for (const remote of remotes) {
+    const access = parsed(RepositoryAccess, await probe([cli, 'api', `repos/${remote}`, '--jq', '{name: .full_name, push: .permissions.push}']).catch((error: unknown) => {
+      throw new SetupError('repositoryUnreadable', { account: agent.login, repository: remote, output: reason(error) })
+    }))
+    if (!access) throw new SetupError('repositoryUnreported', { repository: remote })
+    if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository: access.name })
+    repositoryAliases[remote] = access.name
+    if (!repositories.some(name => name.toLowerCase() === access.name.toLowerCase())) repositories.push(access.name)
+  }
+  return { ...machine, repository: repositories[0]!, repositories, repositoryAliases,
+    github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
 }
 
 const AuthStatus = z.object({ appId: z.string().regex(/^cli_[A-Za-z0-9]+$/), brand: z.enum(['feishu', 'lark']).default('feishu'), identities: z.object({ bot: z.object({ status: z.string() }) }) })

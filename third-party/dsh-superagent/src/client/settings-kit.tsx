@@ -221,7 +221,7 @@ function RowsField({ field, value, saved, onChange, labels, refreshLabels }: {
           : undefined} icon={<Icon name="refresh" />}
           disabled={refresh.busy} aria-busy={refresh.busy} onClick={() => { void refresh.run() }}>{localized(t, key.refresh)}</Button>}
         <Button variant="ghost" size="sm" icon={<Icon name="plus" />} onClick={() => { setOpen(true); onChange([...rows,
-          blank]) }}>{t('addRow')}</Button>
+          blank]) }}>{field.add ? localized(t, field.add) : t('addRow')}</Button>
       </span>
     </div>
     {rows.length > ROWS_SHOWN && <button type="button" className="dt-textlink dt-rows-summary" aria-expanded={open}

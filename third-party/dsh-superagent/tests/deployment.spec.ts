@@ -57,6 +57,24 @@ describe('configuration schema', () => {
 })
 
 describe('setup', () => {
+  it('checks each watching repository under the shared account and reports the inaccessible repository', async () => {
+    const calls: string[] = []
+    const checked: Probe = async args => {
+      calls.push(args[2]!)
+      return args[2] === 'user' ? JSON.stringify({ login: 'Agent-Bot', id: 7 })
+        : JSON.stringify({ name: args[2]!.slice(6), push: args[2] !== 'repos/another-owner/private' })
+    }
+    const accounts = { repository: 'acme/widgets', cli: 'gh', repositories: [
+      { id: 'acme/widgets' }, { id: 'another-owner/project' }, { id: 'another-owner/private', status: 'paused' },
+    ] }
+    const deployment = await resolveDeployment(machine(), accounts, checked, path)
+    expect(deployment.repositories).toEqual(['acme/widgets', 'another-owner/project'])
+    expect(calls).toEqual(['user', 'repos/acme/widgets', 'repos/another-owner/project'])
+    await expect(resolveDeployment(machine(), { ...accounts, repositories: [...accounts.repositories,
+      { id: 'another-owner/private' }] }, checked, path)).rejects.toThrow('only once')
+    await expect(resolveDeployment(machine(), { ...accounts, repositories: [{ id: 'acme/widgets' }, { id: 'another-owner/private' }] }, checked, path))
+      .rejects.toEqual(setupError('github', 'repositoryReadOnly', { repository: 'another-owner/private' }))
+  })
   it('reads the repository from the GitHub Source and the accounts from their CLIs, skipping the worker shims', async () => {
     const deployment = await resolveDeployment(machine(), { repository: 'acme/widgets', cli: 'gh' }, probe, path)
     expect(deployment).toMatchObject({ repository: 'acme/widgets', github: { cli: join(dir, 'bin', 'gh'), login: 'Agent-Bot', noreply: '7+Agent-Bot@users.noreply.github.com' } })

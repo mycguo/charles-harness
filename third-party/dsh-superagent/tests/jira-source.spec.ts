@@ -62,6 +62,25 @@ const rows = (h: ReturnType<typeof fixture>) => h.store.db.prepare('SELECT value
 const message = (): OutboundMessage => ({ id: 'ack-1', kind: 'acknowledgement', channel: jiraTrigger(config, issue(), comment())!.channel!, text: 'On it. Fixing the export.' })
 
 describe('Jira command intake', () => {
+  it('routes mapped projects to separate watched repositories and their worker environments', async () => {
+    const h = fixture()
+    h.deployment.repositories = ['acme/widgets', 'other/tools']
+    const mapped = { ...config, projects: [...config.projects, { project: 'OTHER', repository: 'other/tools' }] }
+    h.store.saveSettings({ ...h.store.settings(), sources: { jira: { enabled: true, config: mapped } } })
+    api((path, body) => path === 'search/jql' ? { issues: [String(body?.jql).includes('"OTHER"') ? issue('102', 'OTHER') : issue()], isLast: true } : undefined)
+    await pollJira(h.ctx)
+    vi.setSystemTime(Date.parse(now) + 1)
+    await pollJira(h.ctx)
+    const received = rows(h)
+    expect(received).toHaveLength(2)
+    expect(new Set(received.map(trigger => trigger.channel?.thread)).size).toBe(2)
+    for (const trigger of received) {
+      expect(githubKind.environment!.values({ deployment: h.deployment, config: githubKind.schema.parse({}), trigger })
+        .DSH_SUPERAGENT_GITHUB_REPOSITORY).toBe(trigger.meta.repository)
+    }
+    expect(received.find(trigger => trigger.meta.project === 'OTHER')?.meta.repository).toBe('other/tools')
+  })
+
   it('requires a real command on the first nonblank line and preserves quoted ADF', () => {
     expect(jiraCommand('\n/superagent implement this')).toBe(true)
     for (const text of ['/superagent', '/superagentx do this', 'Please /superagent do this', '> /superagent do this', '```\n/superagent do this\n```', '/superagent do this\n\ndsh-superagent:ack']) expect(jiraCommand(text)).toBe(false)
@@ -155,7 +174,7 @@ describe('Jira command intake', () => {
   it('rejects unwatched mappings and stops without advancing when configuration changes', async () => {
     const h = fixture(); const fetcher = api()
     h.store.saveSettings({ ...h.store.settings(), sources: { jira: { enabled: true, config: { ...config, projects: [{ project: 'DEMO', repository: 'acme/unwatched' }] } } } })
-    await expect(pollJira(h.ctx)).rejects.toThrow('Repository is not configured')
+    await expect(pollJira(h.ctx)).rejects.toThrow('Repository is not watched')
     expect(fetcher).not.toHaveBeenCalled()
     h.store.saveSettings({ ...h.store.settings(), sources: { jira: { enabled: true, config } } })
     api(path => {
