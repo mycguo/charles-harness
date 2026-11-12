@@ -35,3 +35,5 @@ DSH_HOME="$HOME/.dsh_charles" pnpm dsh plugin --profile superagent add file:"$PW
 ```
 
 Restart with the command above. The profile owns its installed files; it does not link to the snapshot's source directory.
+
+For the existing Tebra Google Cloud VM, follow [the Harness replacement guide](../docs/cookbook/deploy-google-cloud.md).

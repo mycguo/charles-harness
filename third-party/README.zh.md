@@ -35,3 +35,5 @@ DSH_HOME="$HOME/.dsh_charles" pnpm dsh plugin --profile superagent add file:"$PW
 ```
 
 使用上面的启动命令重启。配置档拥有自己安装的文件，不链接到快照源码目录。
+
+现有 Tebra Google Cloud VM 的部署请遵循 [Harness 替换指南](../docs/cookbook/deploy-google-cloud.zh.md)。

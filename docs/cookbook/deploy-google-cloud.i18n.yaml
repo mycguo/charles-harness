@@ -1,0 +1,37 @@
+# Bilingual-pair consistency record for deploy-google-cloud.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/cookbook/deploy-google-cloud.md
+/:
+  en: 4a0113e961f029ae
+  zh: f4e4016506a7d427
+/deploy-charles-harness-to-the-existing-google-cloud-vm:
+  en: d8c19a2c1a62d29b
+  zh: 0619d0883cb2e304
+/deploy-charles-harness-to-the-existing-google-cloud-vm/summary:
+  en: 4b566241269a9044
+  zh: e1920c2c55f33e63
+/deploy-charles-harness-to-the-existing-google-cloud-vm/table-of-contents:
+  en: a9d31db8b5cd1441
+  zh: f70eea74a7b86c46
+/deploy-charles-harness-to-the-existing-google-cloud-vm/1-prepare-the-existing-vm:
+  en: 7ff57d1872193b6d
+  zh: e9e12afbfe892277
+/deploy-charles-harness-to-the-existing-google-cloud-vm/2-build-the-harness:
+  en: 788475a953f27be8
+  zh: 148e436f4ad287cb
+/deploy-charles-harness-to-the-existing-google-cloud-vm/3-switch-the-existing-service:
+  en: ed6433e35c9191f3
+  zh: 0d8cb27f778539db
+/deploy-charles-harness-to-the-existing-google-cloud-vm/4-verify-the-cutover:
+  en: 1721bb7f7393a219
+  zh: 55a181117f54a76f
+/deploy-charles-harness-to-the-existing-google-cloud-vm/5-deploy-branches-and-prs:
+  en: b9c8ef93391cab8c
+  zh: 44a2f39b87b3fd82
+/deploy-charles-harness-to-the-existing-google-cloud-vm/recovery-and-retained-releases:
+  en: cc8553cbf496683a
+  zh: e744b3ceeb517c4e
+/deploy-charles-harness-to-the-existing-google-cloud-vm/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269
