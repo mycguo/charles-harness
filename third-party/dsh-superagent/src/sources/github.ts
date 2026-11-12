@@ -2,7 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { key, type Thread } from '../core/index.ts'
 import { sameName } from '../infra/text.ts'
-import { GithubAccountsSchema } from '../deployment.ts'
+import { deploymentRepositories, githubRepositories, GithubAccountsSchema } from '../deployment.ts'
+import { githubThread, repositoryContext, repositoryInUrl, triggerRepository } from './github-repository.ts'
 import { CliError, validItems, type Tally } from '../infra/commands.ts'
 import { ciCounts, ciFact, ciFailures, ciSummary, githubThreadContext, pullChecks } from './github-read.ts'
 import { branchCiTrigger, ciTrigger, commentTrigger, CommentSchema, githubAddress, githubInput, issueTrigger, IssueSchema, pullTrigger, SOURCE }
@@ -26,7 +27,9 @@ const GithubConfigSchema = GithubAccountsSchema.extend({ pollSeconds: z.number()
   failuresBeforeError: z.number().int().min(1).max(20).default(3),
   allowSelfRequests: z.boolean().default(false),
   observeIssues: z.boolean().default(false), observePulls: z.boolean().default(false), observeComments: z.boolean().default(false),
-  observeCi: z.boolean().default(false) }).strict()
+  observeCi: z.boolean().default(false) }).strict().transform(config => ({ ...config,
+    repository: config.repository || config.repositories?.find(row => row.status === 'watch')?.id || '',
+    repositories: config.repositories ?? (config.repository ? [{ id: config.repository, status: 'watch' as const }] : []) }))
 export type GithubConfig = z.infer<typeof GithubConfigSchema>
 const OBSERVED = { issues: 'observeIssues', pulls: 'observePulls', comments: 'observeComments', ci: 'observeCi' } as const
 type Scope = keyof typeof OBSERVED
@@ -39,11 +42,14 @@ function scopeOf(meta: Record<string, unknown>): Scope | undefined {
 export const githubKind: SourceKind<GithubConfig> = {
   kind: SOURCE,
   title: { zh: 'GitHub', en: 'GitHub' },
-  description: { zh: '智能体的 GitHub 账号；接收仓库里发给它的通知、已订阅 Issue 与 PR 的讨论、CI 状态变化和 PR 合并关闭。', en: 'The agent\'s GitHub accounts; receives notifications to it in the repository, discussion on subscribed Issues and PRs, CI changes, and PR merge or close.' },
+  description: { zh: '智能体的 GitHub 账号；接收仓库里发给它的通知、已订阅 Issue 与 PR 的讨论、CI 状态变化和 PR 合并关闭。', en: 'The agent\'s GitHub account; receives notifications, subscribed discussions, CI changes, and PR outcomes across watched repositories.' },
   schema: GithubConfigSchema,
   fields: [
-    { key: 'repository', type: 'text', pattern: '[A-Za-z0-9_.\\-]+/[A-Za-z0-9_.\\-]+', label: { zh: '监听的仓库', en: 'Repository' },
-      hint: { zh: '写作 owner/name。这个来源接收这个仓库的通知和讨论；保存时检查智能体账号能否推送到它，然后重启 dsh-superagent。', en: 'Written owner/name. This Source receives the repository\'s notifications and discussion; saving checks that the agent account can push to it, then restarts dsh-superagent.' } },
+    { key: 'repositories', type: 'rows', label: { zh: '仓库', en: 'Repositories' }, add: { zh: '添加仓库', en: 'Add repository' },
+      hint: { zh: '添加任意有工作权限的 owner/repo。保存前检查账号权限。每个仓库独立轮询；第一行监听中的仓库也是未指定仓库的请求的默认仓库。', en: 'Add any owner/repo this account can work in. Access is checked before saving. Each repository is polled independently; the first watching repository is the default for requests without a repository mapping.' },
+      columns: [{ key: 'id', type: 'text', label: { zh: 'owner/repo', en: 'owner/repo' }, pattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' },
+        { key: 'status', type: 'select', label: { zh: '状态', en: 'Status' }, options: [
+          { value: 'watch', label: { zh: '监听', en: 'Watching' } }, { value: 'paused', label: { zh: '已暂停', en: 'Paused' } }] }] },
     { key: 'cli', type: 'text', label: { zh: '智能体的 GitHub CLI', en: 'Agent GitHub CLI' },
       hint: { zh: '命令名或绝对路径，通常是用 GH_CONFIG_DIR 登录智能体账号的 gh 包装脚本。智能体以它登录的账号行事，执行器以 gh 调用它。保存时检查它登录的账号能否推送到仓库，然后重启 dsh-superagent。', en: 'A command name or absolute path, usually a gh wrapper signed in to the agent account through GH_CONFIG_DIR. The agent acts as the account it is signed in to, and the Executor calls it as gh. Saving checks that this account can push to the repository, then restarts dsh-superagent.' } },
     { key: 'allowSelfRequests', type: 'switch', label: { zh: '单账号模式', en: 'Single-account mode' },
@@ -60,16 +66,26 @@ export const githubKind: SourceKind<GithubConfig> = {
       hint: { zh: '打开后，默认分支的 CI 失败和恢复会收到，由策略的接收表决定是否成为候选。', en: 'Failures of the default branch\'s CI, and its recovery, are received, and the Policy\'s admission table decides whether they become candidates.' } }],
   // What the Source observes across the repository it receives in full; elsewhere, only what addresses the agent.
   scope: ({ meta }, config) => {
+    const repository = typeof meta.configuredRepository === 'string' ? meta.configuredRepository
+      : typeof meta.repository === 'string' ? meta.repository : config.repository
+    if (repository && !githubRepositories(config).some(name => sameName(name, repository))) return { listened: false, observed: false, reason: 'repository_not_watched' }
     const row = scopeOf(meta)
     return { listened: true, observed: row !== undefined && config[OBSERVED[row]], ...row ? { row } : {} }
   },
   health: ['github'],
-  channel: { send: sendGithub, link: githubLink },
+  channel: { send: sendGithub, link: githubLink, allowed: (address, config) => {
+    const repository = address.configuredRepository ?? address.repository ?? repositoryInUrl(address.url ?? '') ?? config.repository
+    return !repository || githubRepositories(config).some(name => sameName(name, repository))
+  } },
   threadContext: githubThreadContext,
-  // `#12`, `12`, or the page of an Issue or PR, of any repository, names Thread 12.
-  find: query => {
+  // Numeric references use their request repository; an explicit URL selects a watched repository.
+  find: (query, config, origin) => {
+    config ??= GithubConfigSchema.parse({})
     const number = (/^#?(\d+)$/.exec(query.trim()) ?? /github\.com\/[^/]+\/[^/]+\/(?:pull|issues)\/(\d+)/.exec(query))?.[1]
-    return { threads: number ? [`${SOURCE}:${number}`] : [], terms: [] }
+    const repository = repositoryInUrl(query) ?? (origin?.source === SOURCE ? String(origin.meta.configuredRepository ?? origin.meta.repository ?? '') || repositoryInUrl(origin.url ?? '') : undefined)
+    const names = repository ? githubRepositories(config).filter(name => sameName(name, repository)) : githubRepositories(config)
+    return { threads: number ? names.length ? names.map(name => githubThread(name, number, config.repository || names[0]!))
+      : !config.repository && !config.repositories.length ? [`${SOURCE}:${number}`] : [] : [], terms: [] }
   },
   policy: {
     schema: z.object({ allowed: z.array(z.object({ id: z.string().regex(/^[A-Za-z0-9-]+$/) }).strict()).default([]),
@@ -81,7 +97,7 @@ export const githubKind: SourceKind<GithubConfig> = {
       columns: [{ key: 'id', type: 'text', label: { zh: '账号', en: 'Account' }, pattern: '[A-Za-z0-9\\-]+(\\[bot\\])?' }] }],
     explicit: { zh: '名单里的账号在 Issue 或评论里 @ 智能体的账号。', en: 'An account on the list mentions the agent\'s account in an Issue or a comment.' },
     rows(stored) {
-      const config = GithubConfigSchema.partial().parse(stored)
+      const config = GithubConfigSchema.parse(stored)
       const note = (observed: boolean | undefined) => observed ? { zh: '全部', en: 'All' } : { zh: '仅 @', en: '@ only' }
       const row = (id: Scope, label: { zh: string; en: string }) => ({ id, label, note: note(config[OBSERVED[id]]),
         cells: { listedUnaddressed: !!config[OBSERVED[id]], unlistedAddressed: true, unlistedUnaddressed: !!config[OBSERVED[id]] } })
@@ -102,7 +118,7 @@ export const githubKind: SourceKind<GithubConfig> = {
     ],
     values: ({ deployment, trigger }) => {
       const number = trigger?.threads[0]?.source === SOURCE ? Number(trigger.meta.number) || 0 : 0
-      return { DSH_SUPERAGENT_GITHUB_REPOSITORY: deployment.repository, DSH_SUPERAGENT_GITHUB_ACCOUNT: deployment.github.login, DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL: deployment.github.noreply, DSH_SUPERAGENT_GITHUB_NUMBER: number ? String(number) : '',
+      return { DSH_SUPERAGENT_GITHUB_REPOSITORY: triggerRepository(deployment, trigger), DSH_SUPERAGENT_GITHUB_ACCOUNT: deployment.github.login, DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL: deployment.github.noreply, DSH_SUPERAGENT_GITHUB_NUMBER: number ? String(number) : '',
         DSH_SUPERAGENT_GITHUB_PR_HEAD: number && trigger?.meta.isPr === true ? `refs/pull/${number}/head` : '' }
     },
   },
@@ -285,6 +301,23 @@ async function pollBranchCi(ctx: SourceContext, round: Round): Promise<void> {
  * @returns the polling interval requested by GitHub, in seconds.
  */
 export async function pollRound(ctx: SourceContext, signal?: AbortSignal): Promise<number> {
+  const repositories = deploymentRepositories(ctx.deployment)
+  let interval = 60
+  const failures: string[] = []
+  const reports: string[] = []
+  for (const repository of repositories) {
+    if (signal?.aborted) break
+    const scoped = repositoryContext(ctx, repository)
+    try { interval = Math.max(interval, await pollRepositoryRound({ ...scoped,
+      report: (entry, value) => { reports.push(`${repository}: ${value.detail}`); if (repositories.length === 1) ctx.report(entry, value) },
+    }, signal)) }
+    catch (error) { failures.push(`${repository}: ${String(error)}`) }
+  }
+  if (failures.length) throw new Error(failures.join('; '))
+  if (repositories.length > 1 && !signal?.aborted) ctx.report('github', { state: 'ready', detail: reports.join('; '), at: new Date().toISOString() })
+  return interval
+}
+async function pollRepositoryRound(ctx: SourceContext, signal?: AbortSignal): Promise<number> {
   const round = newRound(signal)
   const notified = await pollNotifications(ctx, round).then(value => ({ value }), (error: unknown) => ({ error }))
   await pollRepository(ctx, round)

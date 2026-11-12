@@ -1,0 +1,9 @@
+version: 1
+scenario: superagent-repositories
+profile: headless
+composition: superagent-repositories
+recording: authored
+header:
+  class: superagent-repositories
+  pin: true
+  systemPromptSource: text-turn

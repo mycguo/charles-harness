@@ -1,0 +1,3 @@
+- insert:
+    - id: repository-fixture
+      name: './repository-fixture.mjs'

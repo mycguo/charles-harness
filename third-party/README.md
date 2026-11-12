@@ -44,4 +44,8 @@ Enable **Superagent → Settings → Sources → GitHub → Single-account mode*
 
 ## Jira
 
-Rebuild and reinstall the bundle before enabling its optional [Jira read tools](dsh-superagent/docs/013-jira-rest.md), [comment request Source](dsh-superagent/docs/014-jira-source.md), or [named MCP connections](dsh-superagent/docs/012-jira-mcp.md). Each Jira project maps to this deployment’s configured GitHub repository.
+Rebuild and reinstall the bundle before enabling its optional [Jira read tools](dsh-superagent/docs/013-jira-rest.md), [comment request Source](dsh-superagent/docs/014-jira-source.md), or [named MCP connections](dsh-superagent/docs/012-jira-mcp.md). Each Jira project maps to a Watching GitHub repository in this deployment.
+
+## Multiple repositories
+
+Use **Superagent → Settings → Sources → GitHub → Add repository** to manage Watching and Paused repositories. Rebuild and reinstall the bundle first, then configure the [repository-aware checkout helper](dsh-superagent/docs/006-deployment.md#multiple-repositories) before running jobs in another repository. Existing single-repository settings and history remain readable.

@@ -81,3 +81,7 @@ Send one message, under 300 words: what will be installed, the accounts and CLIs
 ## Jira integrations
 
 After rebuilding and reinstalling this bundle, follow [Jira read tools](docs/013-jira-rest.md), [Jira comment requests](docs/014-jira-source.md), or [Jira MCP setup](docs/012-jira-mcp.md). Use the existing `superagent` profile and `DSH_HOME`; preserve existing settings and enable only the integrations you need.
+
+## Multiple repositories
+
+In **Superagent → Settings → Sources → GitHub**, choose **Add repository** for each `owner/repo`, then save. Configure a repository-aware prepare command before accepting work for another repository; the packaged POSIX helper and existing-data behavior are described in [deployment setup](docs/006-deployment.md#multiple-repositories). Jira projects map to Watching repositories from this list.

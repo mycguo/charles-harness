@@ -4,6 +4,7 @@ import type { ThreadFact } from '../core/index.ts'
 import { validItems, type Commands, type Tally } from '../infra/commands.ts'
 import { CommentSchema, IssueSchema, isHumanLogin, reviewPlace, type GithubComment } from './github-trigger.ts'
 import type { ContextMessage, ThreadContext } from './kind.ts'
+import { triggerRepository } from './github-repository.ts'
 
 const CheckSchema = z.looseObject({ name: z.string(), status: z.string(), conclusion: z.string().nullable() })
 const StatusSchema = z.looseObject({ context: z.string(), state: z.string() })
@@ -100,6 +101,14 @@ function threadMessages(thread: GithubComment[], id: (comment: GithubComment) =>
  * `{ id, from, at, text, reply_to?, path?, line?, url }` messages rather than raw GitHub API records.
  */
 export async function readGithub(commands: Commands, resource: string): Promise<unknown> {
+  const scoped = /^github\/repos\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(.+)$/.exec(resource)
+  if (scoped) {
+    const page = await readGithub(commands.forRepository(scoped[1]!), `github/${scoped[2]}`)
+    if (page && typeof page === 'object' && 'next_resource' in page && typeof page.next_resource === 'string') {
+      return { ...page, next_resource: page.next_resource.replace(/^github\//, `github/repos/${scoped[1]}/`) }
+    }
+    return page
+  }
   // A commit's CI, such as the default branch's, which no PR names.
   const commit = /^github\/commits\/([0-9a-f]{7,40})\/checks$/.exec(resource)
   if (commit) return pullChecks(commands, commit[1]!)
@@ -159,6 +168,7 @@ async function conversationPage(commands: Commands, number: number, page: number
 export const githubThreadContext: ThreadContext<unknown> = {
   messageId: trigger => trigger.url ?? '',
   read: async (commands, trigger, part, cursor) => {
+    commands = commands.forRepository(triggerRepository(commands.deployment, trigger))
     // The default branch's CI has no conversation; its Trigger is its context.
     if (typeof trigger.meta.branch === 'string') {
       const message = { id: trigger.url ?? trigger.id, from: 'CI', at: trigger.at, text: trigger.text, bot: true as const }

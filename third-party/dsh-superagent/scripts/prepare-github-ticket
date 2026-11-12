@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Prepare this ticket from its GitHub repository, using a separate locked Git cache per repository."""
+import fcntl
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+def prepare():
+    repository = os.environ['DSH_SUPERAGENT_GITHUB_REPOSITORY']
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository) or any(part in ('.', '..') for part in repository.split('/')):
+        raise ValueError('Repository must be owner/repo')
+    ticket = os.environ['DSH_SUPERAGENT_TICKET']
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', ticket):
+        raise ValueError('Invalid ticket identifier')
+    source = os.environ.get('DSH_SUPERAGENT_GITHUB_PR_HEAD') or 'HEAD'
+    if source != 'HEAD' and not re.fullmatch(r'refs/pull/[1-9][0-9]*/head', source):
+        raise ValueError('Invalid pull request head ref')
+    directory = Path(os.environ['DSH_SUPERAGENT_DIR'])
+    cache_root = Path(os.environ['DSH_SUPERAGENT_REPOSITORY_CACHE'])
+    if not directory.is_absolute() or not cache_root.is_absolute():
+        raise ValueError('Ticket and cache directories must be absolute')
+    directory = directory.resolve()
+    cache = cache_root.resolve() / (repository.lower() + '.git')
+    cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def git(*args):
+        return subprocess.run(['git', *map(str, args)], check=True, capture_output=True, text=True, timeout=180).stdout.strip()
+
+    with Path(str(cache) + '.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not cache.exists():
+            git('init', '--bare', '--quiet', cache)
+        if (directory / '.git').exists():
+            common = Path(git('-C', directory, 'rev-parse', '--path-format=absolute', '--git-common-dir')).resolve()
+            if common != cache:
+                raise ValueError('Existing ticket checkout belongs to another repository cache')
+            print('Using existing checkout for ' + repository)
+            return
+        if directory.exists() and any(directory.iterdir()):
+            raise ValueError('Ticket directory is not empty')
+        target = 'refs/dsh-superagent/' + ticket
+        git('--git-dir', cache, 'fetch', '--no-tags', 'https://github.com/' + repository + '.git', source + ':' + target)
+        git('--git-dir', cache, 'worktree', 'add', '--detach', directory, target)
+        print('Prepared ' + repository + ' for this ticket')
+
+
+if __name__ == '__main__':
+    try:
+        prepare()
+    except (KeyError, ValueError, OSError, subprocess.SubprocessError) as error:
+        detail = error.stderr.strip() if isinstance(error, subprocess.CalledProcessError) else str(error)
+        print('Could not prepare the repository checkout: ' + detail, file=sys.stderr)
+        sys.exit(1)

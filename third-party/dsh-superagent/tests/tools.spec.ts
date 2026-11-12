@@ -16,6 +16,39 @@ const words = (count: number) => Array.from({ length: count }, () => 'word').joi
 const read = (resource: string, page: { offset?: number; limit?: number } = {}) =>
   h.runTool(h.runtime.masterId, 'orchestrator_read', { resource, ...page })
 
+it('keeps worker reads and PR reports in the originating repository while main reads can select a watched repository', async () => {
+  const first = h.runtime.deployment.repository, second = 'other/tools'
+  expect(h.runtime.store.get(KV.github.legacyRepository)).toBe(first)
+  h.runtime.deployment.repositories = [first, second]
+  const settings = h.runtime.store.settings()
+  settings.sources.github!.config.repositories = [{ id: first, status: 'watch' }, { id: second, status: 'watch' }]
+  h.runtime.store.saveSettings(settings)
+  const requests: string[] = []
+  vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => {
+    const path = args[1]!
+    requests.push(path)
+    const repository = path.startsWith(`repos/${second}/`) ? second : first
+    return { id: 42, number: 42, title: repository, state: 'open', created_at: '2026-11-01T00:00:00Z', body: 'Fix the export',
+      user: { login: 'alice' }, head: { sha: 'abc', ref: 'fix-export', repo: { full_name: repository } },
+      html_url: `https://github.com/${repository}/pull/42` }
+  })
+  const { ticket, sessionId } = await h.acceptedTicket({ ...feishu('1', '@bot Fix the export'), source: 'github',
+    actor: { source: 'github', id: 'alice' }, threads: [{ source: 'github', id: `${second}#42` }],
+    channel: { source: 'github', thread: `github:${second}#42`, address: { repository: second, number: '42' } },
+    meta: { repository: second, number: 42, isPr: true } })
+  requests.length = 0
+  expect(h.runtime.ticketEnvironment(ticket).find(variable => variable.key === 'DSH_SUPERAGENT_GITHUB_REPOSITORY')?.value).toBe(second)
+  expect(await h.runTool(sessionId, 'orchestrator_read', { resource: 'github/issues/42' }))
+    .toMatchObject({ text: expect.stringContaining(second) })
+  await expect(h.runTool(sessionId, 'orchestrator_read', { resource: `github/repos/${first}/issues/42` }))
+    .rejects.toThrow('another repository')
+  await h.runTool(sessionId, 'orchestrator_report', { state: 'progress', summary: 'Working on the export.', pr_number: 42 })
+  expect(h.runtime.store.tickets.get(ticket.id)?.follows?.[0]?.thread).toBe(`github:${second}#42`)
+  expect(requests.every(path => path.startsWith(`repos/${second}/`))).toBe(true)
+  expect(await read(`github/repos/${first}/issues/42`)).toMatchObject({ text: expect.stringContaining(first) })
+  await expect(read('github/repos/unwatched/repository/issues/42')).rejects.toThrow('not watched')
+})
+
 it('reads the lists, a ticket, a decision, the settings, the prompts and the models as resources', async () => {
   const { ticket, trigger } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
   await h.acceptedTicket(feishu('2', '@bot 再修一个'))

@@ -44,4 +44,8 @@ DSH_HOME="$HOME/.dsh_charles" pnpm dsh plugin --profile superagent add file:"$PW
 
 ## Jira
 
-启用可选的 [Jira 读取工具](dsh-superagent/docs/013-jira-rest.md)、[评论请求来源](dsh-superagent/docs/014-jira-source.md)或[具名 MCP 连接](dsh-superagent/docs/012-jira-mcp.md)前，先重新构建并安装 bundle。每个 Jira 项目均映射到此部署已配置的 GitHub 仓库。
+启用可选的 [Jira 读取工具](dsh-superagent/docs/013-jira-rest.md)、[评论请求来源](dsh-superagent/docs/014-jira-source.md)或[具名 MCP 连接](dsh-superagent/docs/012-jira-mcp.md)前，先重新构建并安装 bundle。每个 Jira 项目均映射到此部署正在监听的 GitHub 仓库。
+
+## 多个仓库
+
+在 **Superagent → 设置 → 来源 → GitHub → 添加仓库** 中管理监听和暂停的仓库。先重新构建并安装扩展包，再配置[按仓库准备工作目录的辅助脚本](dsh-superagent/docs/006-deployment.md#multiple-repositories)，然后才在其他仓库运行工单。现有单仓库设置和历史记录仍可读取。
