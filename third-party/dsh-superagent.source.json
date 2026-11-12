@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/deepseek-ai/dsh-superagent-prototype",
+  "commit": "8c32a9dc5d72c033816c6a8110b37f40cf94fba4",
+  "tree": "3efbb036e5a56183c6bf642e2e1856a1f64e7be3",
+  "directory": "dsh-superagent",
+  "license": "MIT",
+  "localModifications": [
+    {
+      "path": "skills/dsh-superagent-github/SKILL.md",
+      "change": "Removed one trailing space to satisfy the repository commit checks."
+    }
+  ]
+}
